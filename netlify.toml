@@ -5,7 +5,7 @@
 
 [build]
   publish = "."
-  functions = "netlify/functions"
+  functions = "."
 
 [dev]
   port = 3000
