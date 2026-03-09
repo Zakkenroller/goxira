@@ -270,7 +270,6 @@
     setLoading(btn, true);
     try {
       await Auth.signIn(email, pass);
-      location.href = '/home.html';
     } catch(e) {
       showErr('login-err', e.message);
       setLoading(btn, false);
@@ -296,20 +295,11 @@
     }
   }
 
-  // Handle OAuth redirect
-  Auth.onAuthChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session) {
-      // Create profile if new user
-      const profile = await UserDB.getProfile(session.user.id);
-      if (!profile) {
-        const name = session.user.user_metadata?.display_name
-                  || session.user.user_metadata?.full_name
-                  || session.user.email.split('@')[0];
-        await UserDB.createProfile(session.user.id, name);
-      }
-      location.href = profile?.assessment_done ? '/home.html' : '/assess.html';
-    }
-  });
+Auth.onAuthChange(async (event, session) => {
+  if (event === 'SIGNED_IN' && session) {
+    location.href = 'home.html';
+  }
+});
 
   // ── Helpers ──
   function showErr(id, msg) {
