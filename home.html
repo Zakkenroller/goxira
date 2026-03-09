@@ -1,17 +1,398 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Goxira — Home</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home — Goxira</title>
   <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-main { padding-top: 1.5rem; }
+
+    /* ── Greeting ── */
+    .greeting {
+      margin-bottom: 1.75rem;
+      animation: fadeUp 0.4s ease both;
+    }
+    .greeting__name {
+      font-size: 1.5rem; font-family: var(--font-serif);
+      color: var(--ink); font-weight: 600;
+    }
+    .greeting__sub {
+      font-size: 0.875rem; color: var(--ink-faint); margin-top: 0.2rem;
+    }
+
+    /* ── Rank hero card ── */
+    .rank-hero {
+      background: var(--ink);
+      border-radius: var(--r-lg);
+      padding: 1.5rem;
+      color: var(--paper);
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1.25rem;
+      animation: fadeUp 0.4s ease 0.05s both;
+      position: relative; overflow: hidden;
+    }
+    .rank-hero::before {
+      content: '囲碁';
+      position: absolute; right: 1.5rem; top: 50%;
+      transform: translateY(-50%);
+      font-size: 5rem; opacity: 0.06;
+      font-family: var(--font-serif);
+      pointer-events: none;
+    }
+    .rank-hero__left {}
+    .rank-hero__label {
+      font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase;
+      opacity: 0.5; margin-bottom: 0.3rem;
+    }
+    .rank-hero__rank {
+      font-family: var(--font-serif);
+      font-size: 2rem; font-weight: 600;
+      color: var(--paper); line-height: 1;
+    }
+    .rank-hero__sub {
+      font-size: 0.8rem; opacity: 0.55; margin-top: 0.4rem;
+    }
+    .rank-hero__stone {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: radial-gradient(circle at 38% 35%, rgba(255,255,255,0.25), rgba(255,255,255,0.05));
+      border: 2px solid rgba(255,255,255,0.15);
+      flex-shrink: 0;
+    }
+
+    /* ── Stats row ── */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem; margin-bottom: 1.75rem;
+      animation: fadeUp 0.4s ease 0.1s both;
+    }
+    .stat-card {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.9rem 0.75rem;
+      text-align: center;
+    }
+    .stat-card__value {
+      font-family: var(--font-serif);
+      font-size: 1.5rem; font-weight: 600;
+      color: var(--ink); line-height: 1;
+    }
+    .stat-card__label {
+      font-size: 0.68rem; color: var(--ink-faint);
+      margin-top: 0.3rem; text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Section header ── */
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0.875rem;
+    }
+    .section-header h2 { font-size: 1rem; color: var(--ink); }
+    .section-header a  { font-size: 0.8rem; color: var(--ink-faint); }
+
+    /* ── Quick actions ── */
+    .quick-actions {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 0.75rem; margin-bottom: 1.75rem;
+      animation: fadeUp 0.4s ease 0.15s both;
+    }
+    .action-card {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-lg);
+      padding: 1.1rem;
+      cursor: pointer; text-decoration: none;
+      display: flex; flex-direction: column; gap: 0.5rem;
+      transition: all 0.2s;
+      position: relative; overflow: hidden;
+    }
+    .action-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+      text-decoration: none;
+    }
+    .action-card--primary {
+      background: var(--ink); color: var(--paper);
+      grid-column: 1 / -1;
+      flex-direction: row; align-items: center; gap: 1rem;
+    }
+    .action-card__icon { font-size: 1.75rem; line-height: 1; }
+    .action-card__title {
+      font-size: 0.95rem; font-weight: 600;
+      color: var(--ink);
+      font-family: var(--font-serif);
+    }
+    .action-card--primary .action-card__title { color: var(--paper); }
+    .action-card__desc { font-size: 0.78rem; color: var(--ink-faint); line-height: 1.4; }
+    .action-card--primary .action-card__desc { color: rgba(245,240,232,0.6); }
+    .action-card__arrow {
+      margin-left: auto; font-size: 1.2rem;
+      opacity: 0.4;
+    }
+
+    /* ── Recent games ── */
+    .games-list {
+      display: flex; flex-direction: column; gap: 0.6rem;
+      animation: fadeUp 0.4s ease 0.2s both;
+    }
+    .game-item {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.875rem 1rem;
+      display: flex; align-items: center; gap: 0.875rem;
+      cursor: pointer; transition: all 0.15s;
+      text-decoration: none;
+    }
+    .game-item:hover { background: var(--paper-warm); }
+    .game-item__stones {
+      display: flex; gap: -4px;
+    }
+    .game-stone {
+      width: 24px; height: 24px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .game-stone--b { background: var(--ink); box-shadow: 1px 1px 0 rgba(255,255,255,0.15) inset; }
+    .game-stone--w { background: var(--stone-w); border: 1px solid var(--paper-deep); margin-left: -8px; }
+    .game-item__info { flex: 1; }
+    .game-item__title { font-size: 0.875rem; font-weight: 500; color: var(--ink); }
+    .game-item__meta  { font-size: 0.75rem; color: var(--ink-faint); margin-top: 1px; }
+    .game-item__action { font-size: 0.75rem; color: var(--accent); font-weight: 500; }
+
+    .empty-state {
+      text-align: center; padding: 2rem 1rem;
+      color: var(--ink-faint); font-size: 0.875rem;
+      background: white; border: 1px dashed var(--paper-deep);
+      border-radius: var(--r-lg);
+    }
+    .empty-state__icon { font-size: 2rem; margin-bottom: 0.5rem; }
+
+    /* ── Bottom nav ── */
+    .bottom-nav { display: flex; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
 </head>
 <body>
+
+  <!-- Top nav -->
   <nav class="nav">
-    <span class="nav__logo"><span class="nav__logo-stone"></span> Goxira</span>
+    <a href="home.html" class="nav__logo">
+      <span class="nav__logo-stone"></span>
+      Goxira
+    </a>
+    <div class="nav__links">
+      <a href="problems.html" class="nav__link">Problems</a>
+      <a href="play.html" class="nav__link">Play</a>
+      <a href="review.html" class="nav__link">Review</a>
+      <a href="profile.html" class="nav__link">Profile</a>
+    </div>
   </nav>
-  <div style="padding:3rem; text-align:center;">
-    <h2>You're in! 🎉</h2>
-    <p style="margin-top:1rem;">Auth is working. Dashboard coming in Phase 2.</p>
-  </div>
+
+  <!-- Main -->
+  <main class="page-main">
+    <div class="container">
+
+      <!-- Greeting -->
+      <div class="greeting">
+        <p class="greeting__name" id="greeting-name">Good morning</p>
+        <p class="greeting__sub" id="greeting-sub">Ready to study?</p>
+      </div>
+
+      <!-- Rank hero -->
+      <div class="rank-hero">
+        <div class="rank-hero__left">
+          <p class="rank-hero__label">Current Rank</p>
+          <p class="rank-hero__rank" id="rank-display">—</p>
+          <p class="rank-hero__sub" id="rank-sub">Loading…</p>
+        </div>
+        <div class="rank-hero__stone"></div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <p class="stat-card__value" id="stat-problems">—</p>
+          <p class="stat-card__label">Problems</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-card__value" id="stat-games">—</p>
+          <p class="stat-card__label">Games</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-card__value" id="stat-streak">—</p>
+          <p class="stat-card__label">Streak</p>
+        </div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="section-header">
+        <h2>What would you like to do?</h2>
+      </div>
+      <div class="quick-actions">
+
+        <a href="problems.html" class="action-card action-card--primary">
+          <span class="action-card__icon">🧩</span>
+          <div>
+            <p class="action-card__title">Solve Problems</p>
+            <p class="action-card__desc">Practice with problems tuned to your rank</p>
+          </div>
+          <span class="action-card__arrow">→</span>
+        </a>
+
+        <a href="play.html" class="action-card">
+          <span class="action-card__icon">⚫</span>
+          <p class="action-card__title">Play vs Claude</p>
+          <p class="action-card__desc">Live game at your level</p>
+        </a>
+
+        <a href="review.html" class="action-card">
+          <span class="action-card__icon">🔍</span>
+          <p class="action-card__title">Review a Game</p>
+          <p class="action-card__desc">Upload SGF for analysis</p>
+        </a>
+
+      </div>
+
+      <!-- Recent games -->
+      <div class="section-header">
+        <h2>Recent Games</h2>
+        <a href="review.html">See all</a>
+      </div>
+      <div class="games-list" id="games-list">
+        <div class="empty-state">
+          <div class="empty-state__icon">⚪</div>
+          <p>No games yet — play your first game to see it here.</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Bottom nav (mobile) -->
+  <nav class="bottom-nav">
+    <div class="bottom-nav__item active" onclick="location.href='home.html'">
+      <span class="bottom-nav__icon">⊞</span>Home
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='problems.html'">
+      <span class="bottom-nav__icon">🧩</span>Problems
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='play.html'">
+      <span class="bottom-nav__icon">⚫</span>Play
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='review.html'">
+      <span class="bottom-nav__icon">🔍</span>Review
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='profile.html'">
+      <span class="bottom-nav__icon">◯</span>Profile
+    </div>
+  </nav>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    window.GOTUTOR_CONFIG = {
+      supabaseUrl:     'REPLACE_WITH_YOUR_SUPABASE_URL',
+      supabaseAnonKey: 'REPLACE_WITH_YOUR_SUPABASE_ANON_KEY',
+    };
+  </script>
+  <script src="supabase-client.js"></script>
+  <script src="api.js"></script>
+  <script>
+    async function init() {
+      const session = await Auth.getSession();
+      if (!session) { location.href = '/auth.html'; return; }
+
+      const profile = await UserDB.getProfile(session.user.id);
+      if (!profile) { location.href = '/auth.html'; return; }
+
+      // Redirect to assessment if not done
+      if (!profile.assessment_done) { location.href = '/assess.html'; return; }
+
+      // Greeting
+      const hour = new Date().getHours();
+      const timeOfDay = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+      document.getElementById('greeting-name').textContent =
+        `${timeOfDay}, ${profile.display_name}`;
+
+      // Rank
+      document.getElementById('rank-display').textContent = profile.current_rank;
+
+      // Rank sub-text flavor
+      const rankFlavor = {
+        '30 kyu': 'Just starting out — every stone is a lesson.',
+        '25 kyu': 'Learning the fundamentals.',
+        '20 kyu': 'Getting comfortable with captures.',
+        '15 kyu': 'Reading simple sequences.',
+        '10 kyu': 'Thinking about whole-board strategy.',
+        '5 kyu':  'Approaching single-digit kyu.',
+        '1 kyu':  'On the doorstep of dan.',
+        '1 dan':  'A strong amateur.',
+      };
+      const sub = rankFlavor[profile.current_rank] || 'Keep studying — you\'re improving.';
+      document.getElementById('rank-sub').textContent = sub;
+
+      // Greeting sub
+      document.getElementById('greeting-sub').textContent =
+        profile.rank_score > 0 ? `${profile.rank_score} rank points earned` : 'Ready to place your first stone?';
+
+      // Stats
+      await loadStats(session.user.id);
+
+      // Recent games
+      await loadRecentGames(session.user.id);
+    }
+
+    async function loadStats(userId) {
+      try {
+        // Problem attempts
+        const { data: attempts } = await sb
+          .from('problem_attempts').select('id, solved').eq('user_id', userId);
+        document.getElementById('stat-problems').textContent = attempts?.length || 0;
+
+        // Games
+        const { data: games } = await sb
+          .from('saved_games').select('id').eq('user_id', userId);
+        document.getElementById('stat-games').textContent = games?.length || 0;
+
+        // Streak (days with at least one attempt)
+        document.getElementById('stat-streak').textContent = '—';
+      } catch(e) {
+        console.error('Stats error:', e);
+      }
+    }
+
+    async function loadRecentGames(userId) {
+      const games = await UserDB.getGames(userId, 5);
+      const list  = document.getElementById('games-list');
+
+      if (!games.length) return; // keep empty state
+
+      list.innerHTML = games.map(g => {
+        const date = new Date(g.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const label = g.source === 'live_play' ? 'vs Claude' : 'SGF Upload';
+        return `
+          <a href="review.html?id=${g.id}" class="game-item">
+            <div class="game-item__stones">
+              <div class="game-stone game-stone--b"></div>
+              <div class="game-stone game-stone--w"></div>
+            </div>
+            <div class="game-item__info">
+              <p class="game-item__title">${g.board_size}×${g.board_size} · ${label}</p>
+              <p class="game-item__meta">${date}</p>
+            </div>
+            <span class="game-item__action">Review →</span>
+          </a>
+        `;
+      }).join('');
+    }
+
+    init();
+  </script>
 </body>
 </html>
