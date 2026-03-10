@@ -21,32 +21,30 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 200,
-        system: `You are playing Go against a student at approximately their rank level. Make natural moves with occasional mistakes.
-
-Board coordinates: col and row, 0-indexed from top-left. Max index is boardSize-1.
-To pass, return col: -1, row: -1.
-
-Respond ONLY with valid JSON, no markdown:
-{"col": N, "row": N, "thinking": "one short sentence about your reasoning"}
-
-CRITICAL: Only play on empty intersections. Never repeat a position from the SGF history.`,
+        system: `You are playing Go. Output ONLY a JSON object. No explanation before or after. No markdown. Just the raw JSON.
+Format: {"col": N, "row": N, "thinking": "one short sentence"}
+To pass use col:-1 row:-1. Valid coordinates: 0 to ${boardSize - 1}.`,
         messages: [{
           role: 'user',
-          content: `You play ${color} on a ${boardSize}x${boardSize} board. Student rank: ${rank}.
-Current occupied stones: ${JSON.stringify(currentStones || {})}
-SGF so far: ${sgf || '(game start)'}
-Choose your next move. Valid coordinates: 0 to ${boardSize - 1}.`
+          content: `Play ${color} on ${boardSize}x${boardSize} board at ${rank} level.
+Occupied: ${JSON.stringify(currentStones || {})}
+SGF: ${sgf || '(start)'}
+Reply with JSON only.`
+        },
+        {
+          role: 'assistant',
+          content: '{'
         }],
       }),
     });
 
     const data = await res.json();
-    const text = data.content[0].text.replace(/```json|```/g, '').trim();
-    const move = JSON.parse(text);
+    // Reconstruct — we prefilled the opening brace
+    const raw = '{' + data.content[0].text;
+    const move = JSON.parse(raw);
 
-    // Validate bounds
     if (move.col !== -1 && (move.col < 0 || move.col >= boardSize || move.row < 0 || move.row >= boardSize)) {
-      return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: 'I\'ll pass this turn.' } }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: 'I\'ll pass.' } }) };
     }
 
     return { statusCode: 200, headers, body: JSON.stringify({ move }) };
