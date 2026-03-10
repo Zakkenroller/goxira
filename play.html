@@ -400,7 +400,7 @@
       try {
         const effectiveRank = getEffectiveRank();
         const sgf = buildSGF();
-        const res = await API.getClaudeMove(sgf, claudeColor, boardSize, effectiveRank);
+        const res = await API.getClaudeMove(sgf, claudeColor, boardSize, effectiveRank, board.getStones());
         const move = res.move;
 
         document.getElementById('claude-thinking').classList.remove('show');
