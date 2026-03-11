@@ -1,5 +1,24 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
 
+function stonesToGoNotation(stones, size) {
+  const COLS = 'ABCDEFGHJKLMNOPQRST';
+  const black = [], white = [];
+  Object.entries(stones || {}).forEach(([key, color]) => {
+    const [c, r] = key.split(',').map(Number);
+    const notation = COLS[c] + (size - r);
+    if (color === 'B') black.push(notation);
+    else white.push(notation);
+  });
+  return `Black: ${black.join(', ') || 'none'} | White: ${white.join(', ') || 'none'}`;
+}
+
+function goNotationToCoords(notation, size) {
+  const COLS = 'ABCDEFGHJKLMNOPQRST';
+  const col = COLS.indexOf(notation[0].toUpperCase());
+  const row = size - parseInt(notation.slice(1));
+  return { col, row };
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -10,6 +29,25 @@ exports.handler = async (event) => {
 
   try {
     const { sgf, color, boardSize, rank, currentStones } = JSON.parse(event.body);
+    const COLS = 'ABCDEFGHJKLMNOPQRST';
+
+    // Build list of occupied points in Go notation
+    const occupied = new Set();
+    Object.keys(currentStones || {}).forEach(key => {
+      const [c, r] = key.split(',').map(Number);
+      occupied.add(COLS[c] + (boardSize - r));
+    });
+
+    // Build list of all empty points
+    const empty = [];
+    for (let c = 0; c < boardSize; c++) {
+      for (let r = 0; r < boardSize; r++) {
+        const key = `${c},${r}`;
+        if (!currentStones || !currentStones[key]) {
+          empty.push(COLS[c] + (boardSize - r));
+        }
+      }
+    }
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -21,17 +59,16 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 200,
-        system: `You are playing Go. Output ONLY a JSON object. No explanation before or after. No markdown. Just the raw JSON.
-Format: {"col": N, "row": N, "thinking": "one short sentence"}
-To pass use col:-1 row:-1. Valid coordinates: 0 to ${boardSize - 1}.`,
+        system: `You are playing Go. You MUST choose from the empty points list provided. Output ONLY raw JSON, no explanation, no markdown.
+Format: {"move": "E5", "thinking": "one short sentence"}
+To pass use: {"move": "pass", "thinking": "reason"}`,
         messages: [{
           role: 'user',
-          content: `Play ${color} on ${boardSize}x${boardSize} board at ${rank} level.
-Occupied: ${JSON.stringify(currentStones || {})}
-SGF: ${sgf || '(start)'}
-Reply with JSON only.`
-        },
-        {
+          content: `You play ${color} at ${rank} level on ${boardSize}x${boardSize}.
+Current position: ${stonesToGoNotation(currentStones, boardSize)}
+Available empty points (choose ONE of these): ${empty.slice(0, 40).join(', ')}
+Pick your move.`
+        }, {
           role: 'assistant',
           content: '{'
         }],
@@ -39,15 +76,22 @@ Reply with JSON only.`
     });
 
     const data = await res.json();
-    // Reconstruct — we prefilled the opening brace
-    const raw = '{' + data.content[0].text;
-    const move = JSON.parse(raw);
+    const raw  = '{' + data.content[0].text;
+    const parsed = JSON.parse(raw);
 
-    if (move.col !== -1 && (move.col < 0 || move.col >= boardSize || move.row < 0 || move.row >= boardSize)) {
+    if (parsed.move === 'pass') {
+      return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: parsed.thinking } }) };
+    }
+
+    // Convert Go notation back to coordinates
+    const coords = goNotationToCoords(parsed.move, boardSize);
+
+    // Final safety check
+    if (coords.col < 0 || coords.col >= boardSize || coords.row < 0 || coords.row >= boardSize) {
       return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: 'I\'ll pass.' } }) };
     }
 
-    return { statusCode: 200, headers, body: JSON.stringify({ move }) };
+    return { statusCode: 200, headers, body: JSON.stringify({ move: { col: coords.col, row: coords.row, thinking: parsed.thinking } }) };
   } catch(e) {
     console.error('claude-move error:', e);
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
