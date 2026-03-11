@@ -400,7 +400,7 @@
       try {
         const effectiveRank = getEffectiveRank();
         const sgf = buildSGF();
-        const res = await API.getClaudeMove(sgf, claudeColor, boardSize, effectiveRank, board.getStones());
+        const res = await fetch('/.netlify/functions/claude-move', {   method: 'POST',   headers: { 'Content-Type': 'application/json' },   body: JSON.stringify({ sgf, color: claudeColor, boardSize, rank: effectiveRank, currentStones: board.getStones() }), }).then(r => r.json());
         const move = res.move;
 
         document.getElementById('claude-thinking').classList.remove('show');
