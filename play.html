@@ -413,7 +413,7 @@
           if (consecutivePasses >= 2) { endGame('double-pass'); return; }
         } else {
           consecutivePasses = 0;
-          board.place(move.col, move.row, claudeColor);
+          const occupied = board.getStones(); if (!occupied[`${move.col},${move.row}`]) {   board.place(move.col, move.row, claudeColor); } else {   // Occupied — Claude passes instead   document.getElementById('move-commentary').textContent = 'Claude passes.';   addSGFPass(claudeColor); }
           moveNumber++;
           addSGFMove(claudeColor, move.col, move.row);
           updateMoveCount();
