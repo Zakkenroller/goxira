@@ -1,5 +1,17 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
 
+function stonesToGoNotation(stones, size) {
+  const COLS = 'ABCDEFGHJKLMNOPQRST';
+  const black = [], white = [];
+  Object.entries(stones).forEach(([key, color]) => {
+    const [c, r] = key.split(',').map(Number);
+    const notation = COLS[c] + (size - r);
+    if (color === 'B') black.push(notation);
+    else white.push(notation);
+  });
+  return `Black: ${black.join(', ')} | White: ${white.join(', ')}`;
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -28,7 +40,7 @@ Keep it under 80 words. Conversational, encouraging. No markdown.`,
         messages: [{
           role: 'user',
           content: `Student plays ${playerColor} at ${rank} level. Move ${moveNumber} on ${boardSize}x${boardSize} board.
-Current stones: ${JSON.stringify(currentStones)}
+Current stones in Go notation: ${stonesToGoNotation(currentStones, boardSize)}
 SGF: ${sgf || '(early game)'}
 Give position commentary and strategic guidance.`
         }],
