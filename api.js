@@ -11,7 +11,6 @@ const API = (() => {
     }
     return res.json();
   }
-
   return {
     assess(messages, userContext) {
       return post('assess', { messages, userContext });
@@ -35,7 +34,7 @@ const API = (() => {
 })();
 
 const UI = {
-  toast(message, type = '') {
+  toast(message, type) {
     let container = document.getElementById('toast-container');
     if (!container) {
       container = document.createElement('div');
@@ -44,5 +43,17 @@ const UI = {
       document.body.appendChild(container);
     }
     const t = document.createElement('div');
-    t.className = `toast${type ? ' toast--' + type : ''}`;
-    t.textContent =
+    t.className = 'toast' + (type ? ' toast--' + type : '');
+    t.textContent = message;
+    container.appendChild(t);
+    setTimeout(function() { t.remove(); }, 3200);
+  },
+  async requireAuth() {
+    const session = await Auth.getSession();
+    if (!session) { location.href = 'auth.html'; return null; }
+    return session;
+  },
+};
+
+window.API = API;
+window.UI = UI;
