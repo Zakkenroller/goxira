@@ -333,10 +333,10 @@
 
       // Place setup stones
       const stones = problem.setup?.stones || {};
-      Object.entries(stones).forEach(([key, color]) => {
-        const [c, r] = key.split(',').map(Number);
-        board.place(c, r, color);
-      });
+     Object.entries(stones).forEach(([key, color]) => {
+  const [c, r] = key.split(',').map(Number);
+  board.placeSetup(c, r, color);
+});
 
       // Set current player
       const toPlay = problem.setup?.toPlay || 'B';
