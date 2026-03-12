@@ -147,9 +147,12 @@ CRITICAL rules:
 - 20-25 kyu: small group captures, ladders.
 - 15-20 kyu: ko, basic life/death, two eyes.`;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
+const controller = new AbortController();
+const timeout = setTimeout(() => controller.abort(), 8000);
+const res = await fetch('https://api.anthropic.com/v1/messages', {
+  method: 'POST',
+  signal: controller.signal,
+  headers: {
       'Content-Type': 'application/json',
       'x-api-key': process.env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
@@ -166,6 +169,7 @@ CRITICAL rules:
   });
 
   const data    = await res.json();
+  clearTimeout(timeout);
   const text    = data.content[0].text.replace(/```json|```/g, '').trim();
   return JSON.parse(text);
 }
@@ -185,7 +189,7 @@ exports.handler = async (event) => {
 
     let problem = null;
     let lastReason = '';
-    const MAX_ATTEMPTS = 3;
+    const MAX_ATTEMPTS = 2;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
