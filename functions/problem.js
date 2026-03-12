@@ -78,9 +78,18 @@ function verifyProblem(problem) {
       }
     });
 
-    if (!capturesAny) {
-      return { valid: false, reason: 'solution move does not capture any opponent stones' };
-    }
+   // Also accept moves that put opponent in atari (1 liberty remaining)
+let putsInAtari = false;
+[[sc-1,sr],[sc+1,sr],[sc,sr-1],[sc,sr+1]].forEach(([nc,nr]) => {
+  if (testStones[`${nc},${nr}`] === opponent) {
+    const group = getGroup(nc, nr, testStones);
+    if (getLiberties(group, testStones) <= 1) putsInAtari = true;
+  }
+});
+
+if (!capturesAny && !putsInAtari) {
+  return { valid: false, reason: 'solution move does not capture or threaten opponent stones' };
+}
 
     // For capture problems: find the TARGET group (the one with 1 liberty = atari)
     // Verify at least one opponent group is in atari (1 liberty) in the setup
@@ -94,9 +103,20 @@ function verifyProblem(problem) {
       if (getLiberties(group, stones) === 1) hasAtariGroup = true;
     });
 
-    if (!hasAtariGroup) {
-      return { valid: false, reason: 'no opponent group in atari in the setup' };
-    }
+   // Accept if any opponent group has 1 or 2 liberties (tactically relevant)
+let hasThreatened = false;
+const seen = new Set();
+Object.entries(stones).forEach(([key, color]) => {
+  if (color !== opponent || seen.has(key)) return;
+  const [c, r] = key.split(',').map(Number);
+  const group = getGroup(c, r, stones);
+  group.forEach(([gc,gr]) => seen.add(`${gc},${gr}`));
+  if (getLiberties(group, stones) <= 2) hasThreatened = true;
+});
+
+if (!hasThreatened) {
+  return { valid: false, reason: 'no opponent group under threat in the setup' };
+}
   }
 
   if (topic === 'life-death') {
