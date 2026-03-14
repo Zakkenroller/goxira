@@ -114,17 +114,58 @@ const Board = (() => {
       if (onMove) onMove(pos.col, pos.row);
     });
 
-    overlay.addEventListener('touchend', (e) => {
+    // ── Touch: drag-to-place ──────────────────────────────────────
+    // touchstart → show ghost stone; touchmove → ghost follows finger;
+    // touchend → place stone at wherever the ghost currently is.
+    let activeTouchId = null;
+
+    overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
       e.preventDefault();
       const touch = e.changedTouches[0];
+      activeTouchId = touch.identifier;
+      const pos = svgPos(touch, svg, total, N);
+      if (pos) { hoverPos = `${pos.col},${pos.row}`; drawHover(pos); }
+    }, { passive: false });
+
+    overlay.addEventListener('touchmove', (e) => {
+      if (!interactive) return;
+      e.preventDefault();
+      let touch = null;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === activeTouchId) { touch = e.changedTouches[i]; break; }
+      }
+      if (!touch) return;
+      const pos = svgPos(touch, svg, total, N);
+      if (pos) {
+        const key = `${pos.col},${pos.row}`;
+        if (hoverPos !== key) { hoverPos = key; drawHover(pos); }
+      } else {
+        clearHover();
+      }
+    }, { passive: false });
+
+    overlay.addEventListener('touchend', (e) => {
+      if (!interactive) return;
+      let touch = null;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === activeTouchId) { touch = e.changedTouches[i]; break; }
+      }
+      if (!touch) return;
+      activeTouchId = null;
+      e.preventDefault();
+      clearHover();
       const pos = svgPos(touch, svg, total, N);
       if (!pos) return;
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
       if (key === koPoint) return;
-      clearHover();
       if (onMove) onMove(pos.col, pos.row);
+    });
+
+    overlay.addEventListener('touchcancel', () => {
+      activeTouchId = null;
+      clearHover();
     });
 
     // ── Private helpers ──
@@ -318,8 +359,14 @@ const Board = (() => {
       if (stones[key]) return;
       const x = px(pos.col), y = px(pos.row);
       const c = el(hoverGroup, 'circle');
-      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', CELL * 0.42);
-      c.setAttribute('fill', currentColor === 'B' ? 'rgba(26,20,16,0.3)' : 'rgba(249,246,240,0.6)');
+      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', CELL * 0.46);
+      if (currentColor === 'B') {
+        c.setAttribute('fill', 'rgba(26,20,16,0.55)');
+      } else {
+        c.setAttribute('fill', 'rgba(249,246,240,0.82)');
+        c.setAttribute('stroke', COLORS.stoneStroke);
+        c.setAttribute('stroke-width', '1');
+      }
       c.setAttribute('pointer-events', 'none');
     }
 
