@@ -36,6 +36,10 @@ const Board = (() => {
     let   markers      = {};
     let   koPoint      = null; // forbidden ko point "col,row"
     let   captures     = { B: 0, W: 0 }; // stones captured by each color
+    let   pulseLast    = false; // true only during the drawStones() call after place()
+    let   pendingPos   = null;  // key of stone awaiting auto-confirm, or null
+    let   pendingTimer = null;  // setTimeout handle for auto-confirm
+    const CONFIRM_DELAY = 800;  // ms before a pending stone auto-confirms
 
     // Build SVG
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -119,13 +123,19 @@ const Board = (() => {
     // touchend → place stone at wherever the ghost currently is.
     let activeTouchId = null;
 
+    // How far above the fingertip to float the ghost stone (screen pixels).
+    // Enough to clear the fingertip so the player can see the stone.
+    const TOUCH_LIFT = 60;
+
     overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
       e.preventDefault();
+      // Cancel any pending auto-confirm so the player can change their mind
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; pendingPos = null; clearHover(); }
       const touch = e.changedTouches[0];
       activeTouchId = touch.identifier;
       const pos = svgPos(touch, svg, total, N);
-      if (pos) { hoverPos = `${pos.col},${pos.row}`; drawHover(pos); }
+      if (pos) { hoverPos = `${pos.col},${pos.row}`; drawHover(pos, TOUCH_LIFT); }
     }, { passive: false });
 
     overlay.addEventListener('touchmove', (e) => {
@@ -139,7 +149,7 @@ const Board = (() => {
       const pos = svgPos(touch, svg, total, N);
       if (pos) {
         const key = `${pos.col},${pos.row}`;
-        if (hoverPos !== key) { hoverPos = key; drawHover(pos); }
+        if (hoverPos !== key) { hoverPos = key; drawHover(pos, TOUCH_LIFT); }
       } else {
         clearHover();
       }
@@ -160,11 +170,19 @@ const Board = (() => {
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
       if (key === koPoint) return;
-      if (onMove) onMove(pos.col, pos.row);
+      // Show pending stone with progress ring; auto-confirms after CONFIRM_DELAY
+      pendingPos = key;
+      drawPending(pos);
+      pendingTimer = setTimeout(() => {
+        pendingPos = null; pendingTimer = null;
+        clearHover();
+        if (onMove) onMove(pos.col, pos.row);
+      }, CONFIRM_DELAY);
     });
 
     overlay.addEventListener('touchcancel', () => {
       activeTouchId = null;
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; pendingPos = null; }
       clearHover();
     });
 
@@ -303,6 +321,24 @@ const Board = (() => {
         dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('r', r*0.22);
         dot.setAttribute('fill', color === 'B' ? 'rgba(255,255,255,0.7)' : COLORS.lastMove);
       }
+      // Placement pulse: expanding ring that plays once on stone landing
+      if (isLast && pulseLast) {
+        const ring = el(g, 'circle');
+        ring.setAttribute('cx', x); ring.setAttribute('cy', y); ring.setAttribute('r', String(r));
+        ring.setAttribute('fill', 'none');
+        ring.setAttribute('stroke',
+          color === 'B' ? 'rgba(255,255,255,0.55)' : 'rgba(139,105,20,0.55)');
+        ring.setAttribute('stroke-width', '2');
+        ring.setAttribute('pointer-events', 'none');
+        const aR = el(ring, 'animate');
+        aR.setAttribute('attributeName', 'r');
+        aR.setAttribute('from', String(r * 0.9)); aR.setAttribute('to', String(r * 2.4));
+        aR.setAttribute('dur', '0.4s'); aR.setAttribute('fill', 'freeze');
+        const aO = el(ring, 'animate');
+        aO.setAttribute('attributeName', 'opacity');
+        aO.setAttribute('from', '1'); aO.setAttribute('to', '0');
+        aO.setAttribute('dur', '0.4s'); aO.setAttribute('fill', 'freeze');
+      }
     }
 
     function createStoneGradient(parent, x, y, r, id) {
@@ -353,13 +389,38 @@ const Board = (() => {
       });
     }
 
-    function drawHover(pos) {
+    // screenOffsetY: pixels above the grid intersection to render the ghost stone.
+    // 0 for mouse (pointer is precise), >0 for touch (finger obscures the intersection).
+    function drawHover(pos, screenOffsetY = 0) {
       hoverGroup.innerHTML = '';
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
-      const x = px(pos.col), y = px(pos.row);
+      const x       = px(pos.col);
+      const targetY = px(pos.row);
+      let   ghostY  = targetY;
+      let   ghostR  = CELL * 0.46;
+
+      if (screenOffsetY > 0) {
+        const svgRect = svg.getBoundingClientRect();
+        const vb      = svg.viewBox.baseVal;
+        const scaleY  = (vb.height || total) / Math.max(svgRect.height, 1);
+        ghostY = targetY - screenOffsetY * scaleY;
+        // Keep ghost at least 22 screen-px radius so it's visible above any fingertip,
+        // regardless of board resolution (19×19 stones are small in SVG units on mobile).
+        ghostR = Math.max(CELL * 0.46, 22 * scaleY);
+
+        // Small dot at the actual target intersection
+        const dot = el(hoverGroup, 'circle');
+        dot.setAttribute('cx', x); dot.setAttribute('cy', targetY);
+        dot.setAttribute('r', String(CELL * 0.13));
+        dot.setAttribute('fill',
+          currentColor === 'B' ? 'rgba(26,20,16,0.75)' : 'rgba(249,246,240,0.9)');
+        dot.setAttribute('pointer-events', 'none');
+      }
+
       const c = el(hoverGroup, 'circle');
-      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', CELL * 0.46);
+      c.setAttribute('cx', x); c.setAttribute('cy', String(ghostY));
+      c.setAttribute('r', String(ghostR));
       if (currentColor === 'B') {
         c.setAttribute('fill', 'rgba(26,20,16,0.55)');
       } else {
@@ -368,6 +429,50 @@ const Board = (() => {
         c.setAttribute('stroke-width', '1');
       }
       c.setAttribute('pointer-events', 'none');
+    }
+
+    // Draw a pending stone (normal size) with a clockwise progress arc that
+    // fills over CONFIRM_DELAY ms, showing the player the auto-confirm countdown.
+    function drawPending(pos) {
+      hoverGroup.innerHTML = '';
+      const x = px(pos.col);
+      const y = px(pos.row);
+      const r = CELL * 0.46;
+
+      // Stone at intersection, slightly transparent to signal "not confirmed yet"
+      const c = el(hoverGroup, 'circle');
+      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', String(r));
+      if (currentColor === 'B') {
+        c.setAttribute('fill', 'rgba(26,20,16,0.72)');
+      } else {
+        c.setAttribute('fill', 'rgba(249,246,240,0.88)');
+        c.setAttribute('stroke', COLORS.stoneStroke);
+        c.setAttribute('stroke-width', '0.5');
+      }
+      c.setAttribute('pointer-events', 'none');
+
+      // Clockwise progress ring that fills over CONFIRM_DELAY
+      const ringR = r * 1.35;
+      const circ  = 2 * Math.PI * ringR;
+      const ring  = el(hoverGroup, 'circle');
+      ring.setAttribute('cx', x); ring.setAttribute('cy', y);
+      ring.setAttribute('r', String(ringR));
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke',
+        currentColor === 'B' ? 'rgba(255,255,255,0.75)' : 'rgba(139,105,20,0.85)');
+      ring.setAttribute('stroke-width', String(CELL * 0.08));
+      ring.setAttribute('stroke-dasharray', String(circ));
+      ring.setAttribute('stroke-dashoffset', String(circ));
+      ring.setAttribute('stroke-linecap', 'round');
+      ring.setAttribute('transform', `rotate(-90,${x},${y})`);
+      ring.setAttribute('pointer-events', 'none');
+      const anim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+      anim.setAttribute('attributeName', 'stroke-dashoffset');
+      anim.setAttribute('from', String(circ));
+      anim.setAttribute('to', '0');
+      anim.setAttribute('dur', `${CONFIRM_DELAY}ms`);
+      anim.setAttribute('fill', 'freeze');
+      ring.appendChild(anim);
     }
 
     function clearHover() { hoverGroup.innerHTML = ''; hoverPos = null; }
@@ -392,7 +497,7 @@ const Board = (() => {
 
         lastMove = [col, row];
         currentColor = color === 'B' ? 'W' : 'B';
-        drawStones(); drawMarkers();
+        pulseLast = true; drawStones(); drawMarkers(); pulseLast = false;
         return { captured };
       },
 

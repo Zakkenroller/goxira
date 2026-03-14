@@ -73,6 +73,43 @@
       box-shadow: var(--shadow-lg);
       margin-bottom: 0.875rem;
       position: relative;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* SVG fills container width on desktop */
+    .board-container svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* ── Mobile: keep board + commentary both on-screen ── */
+    @media (max-width: 640px) {
+      .board-container {
+        height: min(calc(100vw - 2rem), calc(100dvh - 400px));
+        min-height: 180px;
+        margin-bottom: 0.5rem;
+        display: flex; align-items: center; justify-content: center;
+      }
+      /* Switch to height-driven so the square board scales down correctly */
+      .board-container svg {
+        height: 100% !important;
+        width: auto !important;
+        max-width: 100%;
+        display: block;
+        margin: 0 auto;
+      }
+      .game-header       { margin-bottom: 0.5rem; }
+      .move-commentary   {
+        padding: 0.45rem 0.75rem;
+        font-size: 0.85rem; line-height: 1.5;
+        min-height: 0;
+        margin-bottom: 0.5rem;
+      }
+      .claude-thinking   { margin-bottom: 0.5rem; padding: 0.4rem 0.75rem; }
+      .game-controls     { margin-bottom: 0.4rem; }
+      .game-controls .btn { font-size: 0.75rem; padding: 0.4rem 0.3rem; }
     }
 
     .claude-thinking {
@@ -384,7 +421,7 @@
       addSGFMove(playerColor, col, row);
       updateMoveCount();
       updateTurnIndicator(claudeColor);
-      document.getElementById('move-commentary').textContent = '…';
+      setCommentary('…');
       board.setInteractive(false);
       document.getElementById('undo-btn').disabled = true;
 
@@ -399,7 +436,7 @@
       if (!hasLegalMoves(claudeColor)) {
         consecutivePasses++;
         addSGFPass(claudeColor);
-        document.getElementById('move-commentary').textContent = 'Goxira has no legal moves — passing.';
+        setCommentary('Goxira has no legal moves — passing.');
         if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
         updateTurnIndicator(playerColor);
         board.setColor(playerColor);
@@ -426,7 +463,7 @@
         if (move.col === -1 && move.row === -1) {
           consecutivePasses++;
           addSGFPass(claudeColor);
-          document.getElementById('move-commentary').textContent = `Goxira passes. ${move.thinking || ''}`;
+          setCommentary(`Goxira passes. ${move.thinking || ''}`);
           if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
         } else {
           const stones = board.getStones();
@@ -434,7 +471,7 @@
             // Illegal — force pass
             consecutivePasses++;
             addSGFPass(claudeColor);
-            document.getElementById('move-commentary').textContent = 'Goxira passes.';
+            setCommentary('Goxira passes.');
             if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
           } else {
             consecutivePasses = 0;
@@ -442,7 +479,7 @@
             moveNumber++;
             addSGFMove(claudeColor, move.col, move.row);
             updateMoveCount();
-            document.getElementById('move-commentary').textContent = move.thinking || 'Goxira played.';
+            setCommentary(move.thinking || 'Goxira played.');
           }
         }
 
@@ -456,7 +493,7 @@
       } catch(e) {
         console.error('Goxira move error:', e);
         document.getElementById('claude-thinking').classList.remove('show');
-        document.getElementById('move-commentary').textContent = 'Goxira is regrouping — your turn.';
+        setCommentary('Goxira is regrouping — your turn.');
         board.setInteractive(true);
         if (snapshot) enableUndo(snapshot);
       }
@@ -483,7 +520,7 @@
       board.setInteractive(true);
       btn.disabled  = true;
       btn._snapshot = null;
-      document.getElementById('move-commentary').textContent = 'Move taken back. Your turn.';
+      setCommentary('Move taken back. Your turn.');
     }
 
     // ── Pass / Resign ─────────────────────────────────────────────
@@ -493,7 +530,7 @@
       addSGFPass(playerColor);
       moveNumber++;
       updateMoveCount();
-      document.getElementById('move-commentary').textContent = 'You passed.';
+      setCommentary('You passed.');
       document.getElementById('undo-btn').disabled = true;
       if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
       board.setInteractive(false);
@@ -540,6 +577,12 @@
     function buildSGF()                  { return `(;GM[1]FF[4]SZ[${boardSize}]${sgfMoves.join('')})`; }
 
     // ── UI ────────────────────────────────────────────────────────
+    function setCommentary(text) {
+      const el = document.getElementById('move-commentary');
+      el.textContent = text;
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
     function updateTurnIndicator(color) {
       const isPlayer = color === playerColor;
       document.getElementById('tag-player').classList.toggle('active',  isPlayer);
@@ -572,9 +615,9 @@
             playerColor, currentStones: board.getStones(), moveNumber,
           }),
         }).then(r => r.json());
-        document.getElementById('move-commentary').textContent = '💬 ' + res.commentary;
+        setCommentary('💬 ' + res.commentary);
       } catch(e) {
-        document.getElementById('move-commentary').textContent = 'Could not get commentary right now.';
+        setCommentary('Could not get commentary right now.');
       }
       btn.disabled    = false;
       btn.textContent = '💬 Ask Goxira for commentary';

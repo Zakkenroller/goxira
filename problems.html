@@ -152,14 +152,6 @@
     .rank-change--up   { background: rgba(45,106,79,0.1);  color: var(--correct); }
     .rank-change--down { background: rgba(139,26,26,0.1);  color: var(--wrong); }
 
-    /* ── Ghost stone pulse on tap ── */
-    @keyframes stonePop {
-      0%   { transform: scale(0.6); opacity: 0.5; }
-      60%  { transform: scale(1.1); opacity: 1; }
-      100% { transform: scale(1);   opacity: 1; }
-    }
-    .stone-pop { animation: stonePop 0.18s ease forwards; }
-
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(6px); }
       to   { opacity: 1; transform: translateY(0); }
@@ -167,6 +159,58 @@
 
     /* ── Bottom nav ── */
     .bottom-nav { display: flex; }
+
+    /* ─────────────────────────────────────────────────────────────
+       Mobile layout: keep board + response both on-screen at once.
+       Strategy: give .board-container an explicit height capped by
+       dvh so there is always room for the commentary below it.
+       Switch SVG to height-driven (height:100%, width:auto) so it
+       scales down proportionally instead of overflowing.
+    ───────────────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      /* Tighten above-board chrome */
+      .page-main            { padding-top: 0.5rem; }
+      .stats-bar            { padding: 0.35rem 0; margin-bottom: 0.4rem; }
+      .stats-bar__value     { font-size: 0.95rem; }
+      .stats-bar__label     { font-size: 0.6rem; }
+      .problem-header       { margin-bottom: 0.4rem; }
+
+      /* Board: explicit height so content below is always visible.
+         min() picks the smaller of:
+           • full container width (board is square, so this is the natural size)
+           • viewport height minus space for all surrounding chrome (~400 px)  */
+      .board-container {
+        height: min(calc(100vw - 2rem), calc(100dvh - 400px));
+        min-height: 180px;   /* never collapse below usable size */
+        margin-bottom: 0.4rem;
+        display: flex; align-items: center; justify-content: center;
+      }
+      /* Height-driven SVG: fills container height, scales width to match
+         (square viewBox means width == height automatically). */
+      .board-container svg {
+        height: 100% !important;
+        width: auto !important;
+        max-width: 100%;
+        display: block;
+        margin: 0 auto;
+      }
+
+      /* Tighten below-board chrome */
+      .problem-description {
+        padding: 0.45rem 0.75rem;
+        font-size: 0.85rem; line-height: 1.45;
+        margin-bottom: 0.4rem;
+      }
+      .attempts-row  { margin-bottom: 0.4rem; }
+      .commentary-box {
+        padding: 0.45rem 0.75rem;
+        font-size: 0.85rem; line-height: 1.5;
+        min-height: 0;
+        margin-bottom: 0.4rem;
+      }
+      .solution-box  { padding: 0.45rem 0.75rem; margin-bottom: 0.4rem; }
+      .action-row    { margin-bottom: 0.5rem; }
+    }
   </style>
 </head>
 <body>
@@ -532,9 +576,12 @@
 
     // ── UI helpers ───────────────────────────────────────────────
     function showCommentary(text, type) {
-      const box     = document.getElementById('commentary');
+      const box = document.getElementById('commentary');
       box.textContent = text;
       box.className   = `commentary-box show${type ? ' ' + type : ''}`;
+      // Smoothly bring the result into view — critical on small phones where
+      // the board fills much of the screen.
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     function showSolution(solution) {
