@@ -123,9 +123,9 @@ const Board = (() => {
     // touchend → place stone at wherever the ghost currently is.
     let activeTouchId = null;
 
-    // How far above the fingertip to float the ghost stone (screen pixels).
-    // Enough to clear the fingertip so the player can see the stone.
-    const TOUCH_LIFT = 60;
+    // Minimum ghost stone radius in screen pixels for touch.
+    // Large enough to peek out around a fingertip on any board size.
+    const TOUCH_GHOST_PX = 22;
 
     overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
@@ -135,7 +135,7 @@ const Board = (() => {
       const touch = e.changedTouches[0];
       activeTouchId = touch.identifier;
       const pos = svgPos(touch, svg, total, N);
-      if (pos) { hoverPos = `${pos.col},${pos.row}`; drawHover(pos, TOUCH_LIFT); }
+      if (pos) { hoverPos = `${pos.col},${pos.row}`; drawHover(pos, true); }
     }, { passive: false });
 
     overlay.addEventListener('touchmove', (e) => {
@@ -149,7 +149,7 @@ const Board = (() => {
       const pos = svgPos(touch, svg, total, N);
       if (pos) {
         const key = `${pos.col},${pos.row}`;
-        if (hoverPos !== key) { hoverPos = key; drawHover(pos, TOUCH_LIFT); }
+        if (hoverPos !== key) { hoverPos = key; drawHover(pos, true); }
       } else {
         clearHover();
       }
@@ -389,37 +389,25 @@ const Board = (() => {
       });
     }
 
-    // screenOffsetY: pixels above the grid intersection to render the ghost stone.
-    // 0 for mouse (pointer is precise), >0 for touch (finger obscures the intersection).
-    function drawHover(pos, screenOffsetY = 0) {
+    // isTouch: when true, ensure the ghost is large enough to peek out around a fingertip.
+    function drawHover(pos, isTouch = false) {
       hoverGroup.innerHTML = '';
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
-      const x       = px(pos.col);
-      const targetY = px(pos.row);
-      let   ghostY  = targetY;
-      let   ghostR  = CELL * 0.46;
+      const x = px(pos.col);
+      const y = px(pos.row);
+      let ghostR = CELL * 0.46;
 
-      if (screenOffsetY > 0) {
+      if (isTouch) {
+        // Convert minimum screen radius → SVG units and take whichever is larger
         const svgRect = svg.getBoundingClientRect();
         const vb      = svg.viewBox.baseVal;
-        const scaleY  = (vb.height || total) / Math.max(svgRect.height, 1);
-        ghostY = targetY - screenOffsetY * scaleY;
-        // Keep ghost at least 22 screen-px radius so it's visible above any fingertip,
-        // regardless of board resolution (19×19 stones are small in SVG units on mobile).
-        ghostR = Math.max(CELL * 0.46, 22 * scaleY);
-
-        // Small dot at the actual target intersection
-        const dot = el(hoverGroup, 'circle');
-        dot.setAttribute('cx', x); dot.setAttribute('cy', targetY);
-        dot.setAttribute('r', String(CELL * 0.13));
-        dot.setAttribute('fill',
-          currentColor === 'B' ? 'rgba(26,20,16,0.75)' : 'rgba(249,246,240,0.9)');
-        dot.setAttribute('pointer-events', 'none');
+        const scale   = (vb.height || total) / Math.max(svgRect.height, 1);
+        ghostR = Math.max(CELL * 0.46, TOUCH_GHOST_PX * scale);
       }
 
       const c = el(hoverGroup, 'circle');
-      c.setAttribute('cx', x); c.setAttribute('cy', String(ghostY));
+      c.setAttribute('cx', String(x)); c.setAttribute('cy', String(y));
       c.setAttribute('r', String(ghostR));
       if (currentColor === 'B') {
         c.setAttribute('fill', 'rgba(26,20,16,0.55)');
