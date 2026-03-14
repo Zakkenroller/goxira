@@ -36,6 +36,7 @@ const Board = (() => {
     let   markers      = {};
     let   koPoint      = null; // forbidden ko point "col,row"
     let   captures     = { B: 0, W: 0 }; // stones captured by each color
+    let   pulseLast    = false; // true only during the drawStones() call after place()
 
     // Build SVG
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -119,13 +120,17 @@ const Board = (() => {
     // touchend → place stone at wherever the ghost currently is.
     let activeTouchId = null;
 
+    // How far above the fingertip to float the ghost stone (screen pixels).
+    // Enough to clear the fingertip so the player can see the stone.
+    const TOUCH_LIFT = 60;
+
     overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
       e.preventDefault();
       const touch = e.changedTouches[0];
       activeTouchId = touch.identifier;
       const pos = svgPos(touch, svg, total, N);
-      if (pos) { hoverPos = `${pos.col},${pos.row}`; drawHover(pos); }
+      if (pos) { hoverPos = `${pos.col},${pos.row}`; drawHover(pos, TOUCH_LIFT); }
     }, { passive: false });
 
     overlay.addEventListener('touchmove', (e) => {
@@ -139,7 +144,7 @@ const Board = (() => {
       const pos = svgPos(touch, svg, total, N);
       if (pos) {
         const key = `${pos.col},${pos.row}`;
-        if (hoverPos !== key) { hoverPos = key; drawHover(pos); }
+        if (hoverPos !== key) { hoverPos = key; drawHover(pos, TOUCH_LIFT); }
       } else {
         clearHover();
       }
@@ -303,6 +308,24 @@ const Board = (() => {
         dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('r', r*0.22);
         dot.setAttribute('fill', color === 'B' ? 'rgba(255,255,255,0.7)' : COLORS.lastMove);
       }
+      // Placement pulse: expanding ring that plays once on stone landing
+      if (isLast && pulseLast) {
+        const ring = el(g, 'circle');
+        ring.setAttribute('cx', x); ring.setAttribute('cy', y); ring.setAttribute('r', String(r));
+        ring.setAttribute('fill', 'none');
+        ring.setAttribute('stroke',
+          color === 'B' ? 'rgba(255,255,255,0.55)' : 'rgba(139,105,20,0.55)');
+        ring.setAttribute('stroke-width', '2');
+        ring.setAttribute('pointer-events', 'none');
+        const aR = el(ring, 'animate');
+        aR.setAttribute('attributeName', 'r');
+        aR.setAttribute('from', String(r * 0.9)); aR.setAttribute('to', String(r * 2.4));
+        aR.setAttribute('dur', '0.4s'); aR.setAttribute('fill', 'freeze');
+        const aO = el(ring, 'animate');
+        aO.setAttribute('attributeName', 'opacity');
+        aO.setAttribute('from', '1'); aO.setAttribute('to', '0');
+        aO.setAttribute('dur', '0.4s'); aO.setAttribute('fill', 'freeze');
+      }
     }
 
     function createStoneGradient(parent, x, y, r, id) {
@@ -353,13 +376,37 @@ const Board = (() => {
       });
     }
 
-    function drawHover(pos) {
+    // screenOffsetY: pixels above the grid intersection to render the ghost stone.
+    // 0 for mouse (pointer is precise), >0 for touch (finger obscures the intersection).
+    function drawHover(pos, screenOffsetY = 0) {
       hoverGroup.innerHTML = '';
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
-      const x = px(pos.col), y = px(pos.row);
+      const x       = px(pos.col);
+      const targetY = px(pos.row); // actual grid intersection in SVG coords
+      let   ghostY  = targetY;
+
+      if (screenOffsetY > 0) {
+        // Convert screen pixels → SVG units using current scale
+        const svgRect = svg.getBoundingClientRect();
+        const vb      = svg.viewBox.baseVal;
+        const scaleY  = (vb.height || total) / Math.max(svgRect.height, 1);
+        ghostY = targetY - screenOffsetY * scaleY;
+
+        // Small dot at the actual target intersection so the player can see
+        // exactly where the stone will land while the ghost floats above
+        const dot = el(hoverGroup, 'circle');
+        dot.setAttribute('cx', x); dot.setAttribute('cy', targetY);
+        dot.setAttribute('r', String(CELL * 0.13));
+        dot.setAttribute('fill',
+          currentColor === 'B' ? 'rgba(26,20,16,0.75)' : 'rgba(249,246,240,0.9)');
+        dot.setAttribute('pointer-events', 'none');
+      }
+
+      // Ghost stone (offset above for touch, at intersection for mouse)
       const c = el(hoverGroup, 'circle');
-      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', CELL * 0.46);
+      c.setAttribute('cx', x); c.setAttribute('cy', String(ghostY));
+      c.setAttribute('r', CELL * 0.46);
       if (currentColor === 'B') {
         c.setAttribute('fill', 'rgba(26,20,16,0.55)');
       } else {
@@ -392,7 +439,7 @@ const Board = (() => {
 
         lastMove = [col, row];
         currentColor = color === 'B' ? 'W' : 'B';
-        drawStones(); drawMarkers();
+        pulseLast = true; drawStones(); drawMarkers(); pulseLast = false;
         return { captured };
       },
 
