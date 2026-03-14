@@ -296,6 +296,7 @@
     let attemptNumber  = 0;
     let hintsUsed      = 0;
     let solved         = false;
+    let isMoving       = false;
     let userId         = null;
     let userProfile    = null;
     let sessionSolved  = 0;
@@ -322,7 +323,7 @@
 
     // ── Load a new problem ───────────────────────────────────────
     async function loadNewProblem() {
-      attemptNumber = 0; hintsUsed = 0; solved = false;
+      attemptNumber = 0; hintsUsed = 0; solved = false; isMoving = false;
       currentProblem = null; gridInfo = null; ghostEl = null;
 
       document.getElementById('commentary').className   = 'commentary-box';
@@ -549,27 +550,29 @@
 
     // ── Handle user move ─────────────────────────────────────────
     async function onMovePlayed(col, row) {
-      if (solved || !currentProblem) return;
+      if (solved || !currentProblem || isMoving) return;
+      isMoving = true;
       attemptNumber++;
-      updatePip(attemptNumber, 'pending');
+      const thisAttempt = attemptNumber; // capture before any await
+      updatePip(thisAttempt, 'pending');
 
       board.setInteractive(false);
       document.getElementById('hint-btn').disabled = true;
 
       try {
         const res = await API.evaluateMove(
-          currentProblem, col, row, attemptNumber, userProfile.current_rank
+          currentProblem, col, row, thisAttempt, userProfile.current_rank
         );
 
         if (res.correct) {
           solved = true;
           board.place(col, row, board.getColor());
           board.addMarker(col, row, 'triangle');
-          updatePip(attemptNumber, 'correct');
+          updatePip(thisAttempt, 'correct');
           showCommentary(res.message, 'correct');
           await onSolved();
         } else {
-          updatePip(attemptNumber, 'wrong');
+          updatePip(thisAttempt, 'wrong');
           showCommentary(res.message, 'wrong');
 
           if (res.solution) {
@@ -586,6 +589,7 @@
       }
 
       document.getElementById('hint-btn').disabled = false;
+      isMoving = false;
     }
 
     // ── Hint ─────────────────────────────────────────────────────

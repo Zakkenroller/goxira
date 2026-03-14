@@ -114,10 +114,22 @@ const Board = (() => {
       if (onMove) onMove(pos.col, pos.row);
     });
 
+    // Track touch start position to distinguish tap from drag
+    let touchStartX = 0, touchStartY = 0;
+    const TAP_THRESHOLD = 10; // pixels
+
+    overlay.addEventListener('touchstart', (e) => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+
     overlay.addEventListener('touchend', (e) => {
       if (!interactive) return;
-      e.preventDefault();
       const touch = e.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      if (Math.hypot(dx, dy) > TAP_THRESHOLD) return; // drag — ignore
+      e.preventDefault();
       const pos = svgPos(touch, svg, total, N);
       if (!pos) return;
       const key = `${pos.col},${pos.row}`;
