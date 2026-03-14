@@ -21,8 +21,8 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 400,
-        system: `You are a Go tutor analyzing a move in a student's game. Be specific and concise (under 120 words). No markdown. Plain conversational language.`,
-        messages: [{ role: 'user', content: `Student rank: ${rank}. Board: ${boardSize}x${boardSize}. Move #${moveNumber}. ${playerColor} played at ${move}. Was this a good move? What would you recommend instead if it was a mistake?` }],
+        system: `You are a Go tutor offering educational commentary on a student's game. You only have the move coordinate — not the full board position — so you cannot evaluate whether the move was good or bad. Do NOT claim it was a mistake or a good move. Instead, offer a brief educational observation about the strategic themes or patterns typically associated with this type of move (e.g., corner approach, extension, invasion, contact play) at the student's level. Be honest that position-specific analysis requires engine support, coming soon. Under 100 words. No markdown. Plain conversational language.`,
+        messages: [{ role: 'user', content: `Student rank: ${rank}. Board: ${boardSize}x${boardSize}. Move #${moveNumber}. ${playerColor} played at ${move}. Share a brief educational note about the strategic themes associated with this move — do not evaluate whether it was correct.` }],
       }),
     });
 

@@ -21,8 +21,15 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 600,
-        system: `You are a Go tutor summarizing a student's game. Respond ONLY with valid JSON, no markdown:
-{"overallComment":"2-3 sentence assessment","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences"}],"studyTopic":"one concept to focus on"}`,
+        system: `You are a Go tutor summarizing a student's game from its SGF record. Respond ONLY with valid JSON, no markdown:
+{"overallComment":"2-3 sentence assessment","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences"}],"studyTopic":"one concept to focus on"}
+
+ACCURACY RULES — follow strictly:
+- Only include keyMoments you can actually identify from the SGF (captures, ko fights, large territory swings, obvious atari sequences). If you cannot point to a specific, verifiable moment, omit it.
+- Do NOT invent blunders or praise at move numbers you cannot support from the record. Fewer honest observations are far better than fabricated ones.
+- overallComment should reflect the general shape of the game (who built territory where, large captures if any) — not invented assessments.
+- If the SGF is too short or unclear to assess, say so honestly in overallComment and return an empty keyMoments array.
+- Full position-by-position engine analysis (KataGo) is coming soon; do not simulate what the engine would say.`,
         messages: [{ role: 'user', content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.\nSGF: ${sgf}` }],
       }),
     });
