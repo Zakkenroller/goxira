@@ -37,6 +37,9 @@ const Board = (() => {
     let   koPoint      = null; // forbidden ko point "col,row"
     let   captures     = { B: 0, W: 0 }; // stones captured by each color
     let   pulseLast    = false; // true only during the drawStones() call after place()
+    let   pendingPos   = null;  // key of stone awaiting auto-confirm, or null
+    let   pendingTimer = null;  // setTimeout handle for auto-confirm
+    const CONFIRM_DELAY = 800;  // ms before a pending stone auto-confirms
 
     // Build SVG
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -127,6 +130,8 @@ const Board = (() => {
     overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
       e.preventDefault();
+      // Cancel any pending auto-confirm so the player can change their mind
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; pendingPos = null; clearHover(); }
       const touch = e.changedTouches[0];
       activeTouchId = touch.identifier;
       const pos = svgPos(touch, svg, total, N);
@@ -165,11 +170,19 @@ const Board = (() => {
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
       if (key === koPoint) return;
-      if (onMove) onMove(pos.col, pos.row);
+      // Show pending stone with progress ring; auto-confirms after CONFIRM_DELAY
+      pendingPos = key;
+      drawPending(pos);
+      pendingTimer = setTimeout(() => {
+        pendingPos = null; pendingTimer = null;
+        clearHover();
+        if (onMove) onMove(pos.col, pos.row);
+      }, CONFIRM_DELAY);
     });
 
     overlay.addEventListener('touchcancel', () => {
       activeTouchId = null;
+      if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; pendingPos = null; }
       clearHover();
     });
 
@@ -383,18 +396,20 @@ const Board = (() => {
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
       const x       = px(pos.col);
-      const targetY = px(pos.row); // actual grid intersection in SVG coords
+      const targetY = px(pos.row);
       let   ghostY  = targetY;
+      let   ghostR  = CELL * 0.46;
 
       if (screenOffsetY > 0) {
-        // Convert screen pixels → SVG units using current scale
         const svgRect = svg.getBoundingClientRect();
         const vb      = svg.viewBox.baseVal;
         const scaleY  = (vb.height || total) / Math.max(svgRect.height, 1);
         ghostY = targetY - screenOffsetY * scaleY;
+        // Keep ghost at least 22 screen-px radius so it's visible above any fingertip,
+        // regardless of board resolution (19×19 stones are small in SVG units on mobile).
+        ghostR = Math.max(CELL * 0.46, 22 * scaleY);
 
-        // Small dot at the actual target intersection so the player can see
-        // exactly where the stone will land while the ghost floats above
+        // Small dot at the actual target intersection
         const dot = el(hoverGroup, 'circle');
         dot.setAttribute('cx', x); dot.setAttribute('cy', targetY);
         dot.setAttribute('r', String(CELL * 0.13));
@@ -403,10 +418,9 @@ const Board = (() => {
         dot.setAttribute('pointer-events', 'none');
       }
 
-      // Ghost stone (offset above for touch, at intersection for mouse)
       const c = el(hoverGroup, 'circle');
       c.setAttribute('cx', x); c.setAttribute('cy', String(ghostY));
-      c.setAttribute('r', CELL * 0.46);
+      c.setAttribute('r', String(ghostR));
       if (currentColor === 'B') {
         c.setAttribute('fill', 'rgba(26,20,16,0.55)');
       } else {
@@ -415,6 +429,50 @@ const Board = (() => {
         c.setAttribute('stroke-width', '1');
       }
       c.setAttribute('pointer-events', 'none');
+    }
+
+    // Draw a pending stone (normal size) with a clockwise progress arc that
+    // fills over CONFIRM_DELAY ms, showing the player the auto-confirm countdown.
+    function drawPending(pos) {
+      hoverGroup.innerHTML = '';
+      const x = px(pos.col);
+      const y = px(pos.row);
+      const r = CELL * 0.46;
+
+      // Stone at intersection, slightly transparent to signal "not confirmed yet"
+      const c = el(hoverGroup, 'circle');
+      c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', String(r));
+      if (currentColor === 'B') {
+        c.setAttribute('fill', 'rgba(26,20,16,0.72)');
+      } else {
+        c.setAttribute('fill', 'rgba(249,246,240,0.88)');
+        c.setAttribute('stroke', COLORS.stoneStroke);
+        c.setAttribute('stroke-width', '0.5');
+      }
+      c.setAttribute('pointer-events', 'none');
+
+      // Clockwise progress ring that fills over CONFIRM_DELAY
+      const ringR = r * 1.35;
+      const circ  = 2 * Math.PI * ringR;
+      const ring  = el(hoverGroup, 'circle');
+      ring.setAttribute('cx', x); ring.setAttribute('cy', y);
+      ring.setAttribute('r', String(ringR));
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke',
+        currentColor === 'B' ? 'rgba(255,255,255,0.75)' : 'rgba(139,105,20,0.85)');
+      ring.setAttribute('stroke-width', String(CELL * 0.08));
+      ring.setAttribute('stroke-dasharray', String(circ));
+      ring.setAttribute('stroke-dashoffset', String(circ));
+      ring.setAttribute('stroke-linecap', 'round');
+      ring.setAttribute('transform', `rotate(-90,${x},${y})`);
+      ring.setAttribute('pointer-events', 'none');
+      const anim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+      anim.setAttribute('attributeName', 'stroke-dashoffset');
+      anim.setAttribute('from', String(circ));
+      anim.setAttribute('to', '0');
+      anim.setAttribute('dur', `${CONFIRM_DELAY}ms`);
+      anim.setAttribute('fill', 'freeze');
+      ring.appendChild(anim);
     }
 
     function clearHover() { hoverGroup.innerHTML = ''; hoverPos = null; }
