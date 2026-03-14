@@ -301,11 +301,6 @@
     let userProfile    = null;
     let sessionSolved  = 0;
 
-    // Grid info derived from rendered SVG — used for touch coordinate mapping
-    let gridInfo = null;  // { originX, originY, cellSize, boardSize }
-    let ghostEl  = null;  // SVG circle used as ghost stone preview
-    let touchActive = false;
-    let pendingMove = null; // [col, row] pending on touchend
 
     // ── Init ────────────────────────────────────────────────────
     async function init() {
@@ -324,7 +319,7 @@
     // ── Load a new problem ───────────────────────────────────────
     async function loadNewProblem() {
       attemptNumber = 0; hintsUsed = 0; solved = false; isMoving = false;
-      currentProblem = null; gridInfo = null; ghostEl = null;
+      currentProblem = null;
 
       document.getElementById('commentary').className   = 'commentary-box';
       document.getElementById('solution-box').className = 'solution-box';
@@ -382,30 +377,28 @@
         `${toPlay === 'B' ? 'Black' : 'White'} to play`;
       document.getElementById('to-play').style.display = 'flex';
 
-      // ── Auto-crop board to stone region + set up touch ──
+      // ── Auto-crop board to stone region ──
       requestAnimationFrame(() => {
-        cropAndSetupTouch(problem, size);
+        cropViewBox(problem, size);
       });
     }
 
     // ── Crop SVG viewBox to the active stone region ──────────────
-    // Uses board.js constants directly — no DOM crawling needed.
-    function cropAndSetupTouch(problem, boardSize) {
+    // Board.js owns all touch/mouse interaction; this only adjusts the
+    // visible area so problems render zoomed in on the relevant section.
+    function cropViewBox(problem, boardSize) {
       const svg = document.querySelector('#board-container svg');
       if (!svg) return;
 
       const PADDING = 28;
       const CELL    = 36;
 
-      // Make SVG responsive
+      // Make SVG fill container width responsively
       svg.setAttribute('width', '100%');
       svg.removeAttribute('height');
       svg.style.width  = '100%';
       svg.style.height = 'auto';
       svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-
-      // Set gridInfo from constants (used by touchToGrid / gridToSVG)
-      gridInfo = { originX: PADDING, originY: PADDING, cellSize: CELL, boardSize };
 
       const stoneKeys = Object.keys(problem.setup?.stones || {});
       if (!stoneKeys.length) return;
@@ -413,139 +406,24 @@
       // Collect all relevant grid coordinates (stones + solution move)
       const allCols = stoneKeys.map(k => parseInt(k.split(',')[0]));
       const allRows = stoneKeys.map(k => parseInt(k.split(',')[1]));
-
       if (problem.solution?.move) {
         allCols.push(problem.solution.move[0]);
         allRows.push(problem.solution.move[1]);
       }
 
-      // Add 2-cell padding around the bounding box, clamped to board edges
+      // 2-cell padding around the bounding box, clamped to board edges
       const PAD    = 2;
       const minCol = Math.max(0, Math.min(...allCols) - PAD);
       const maxCol = Math.min(boardSize - 1, Math.max(...allCols) + PAD);
       const minRow = Math.max(0, Math.min(...allRows) - PAD);
       const maxRow = Math.min(boardSize - 1, Math.max(...allRows) + PAD);
 
-      // Compute viewBox with margin so edge stones aren't clipped
       const margin = CELL * 0.75;
       const vbX = PADDING + minCol * CELL - margin;
       const vbY = PADDING + minRow * CELL - margin;
       const vbW = (maxCol - minCol) * CELL + margin * 2 + CELL;
       const vbH = (maxRow - minRow) * CELL + margin * 2 + CELL;
-
       svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
-
-      // ── Add ghost stone element to SVG ──
-      ghostEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      ghostEl.setAttribute('r', String(CELL * 0.42));
-      ghostEl.setAttribute('opacity', '0');
-      ghostEl.setAttribute('pointer-events', 'none');
-      ghostEl.style.transition = 'opacity 0.1s';
-      svg.appendChild(ghostEl);
-
-      // ── Touch handlers (capture phase to intercept before board.js overlay) ──
-      const container = document.getElementById('board-container');
-      container.addEventListener('touchstart',  onTouchStart,  { passive: false, capture: true });
-      container.addEventListener('touchmove',   onTouchMove,   { passive: false, capture: true });
-      container.addEventListener('touchend',    onTouchEnd,    { passive: false, capture: true });
-      container.addEventListener('touchcancel', onTouchCancel, { passive: false, capture: true });
-    }
-
-    // ── Touch -> grid coordinate mapping ────────────────────────
-    function touchToGrid(touch) {
-      if (!gridInfo) return null;
-      const svg  = document.querySelector('#board-container svg');
-      if (!svg) return null;
-
-      const rect = svg.getBoundingClientRect();
-      const vb   = svg.viewBox.baseVal;
-
-      // Map screen coords -> SVG viewBox coords
-      const scaleX = vb.width  / rect.width;
-      const scaleY = vb.height / rect.height;
-      const svgX   = (touch.clientX - rect.left) * scaleX + vb.x;
-      const svgY   = (touch.clientY - rect.top)  * scaleY + vb.y;
-
-      // Map SVG coords -> grid intersection
-      const { originX, originY, cellSize, boardSize } = gridInfo;
-      const col = Math.round((svgX - originX) / cellSize);
-      const row = Math.round((svgY - originY) / cellSize);
-
-      if (col < 0 || col >= boardSize || row < 0 || row >= boardSize) return null;
-      return [col, row];
-    }
-
-    function gridToSVG(col, row) {
-      if (!gridInfo) return null;
-      return {
-        cx: gridInfo.originX + col * gridInfo.cellSize,
-        cy: gridInfo.originY + row * gridInfo.cellSize,
-      };
-    }
-
-    function showGhost(col, row, color) {
-      if (!ghostEl) return;
-      const pos = gridToSVG(col, row);
-      if (!pos) return;
-      ghostEl.setAttribute('cx', String(pos.cx));
-      ghostEl.setAttribute('cy', String(pos.cy));
-      ghostEl.setAttribute('fill', color === 'W' ? 'white' : '#1a1a1a');
-      ghostEl.setAttribute('stroke', color === 'W' ? '#888' : 'none');
-      ghostEl.setAttribute('stroke-width', color === 'W' ? '1.5' : '0');
-      ghostEl.setAttribute('opacity', '0.55');
-    }
-
-    function hideGhost() {
-      if (ghostEl) ghostEl.setAttribute('opacity', '0');
-    }
-
-    function onTouchStart(e) {
-      if (solved || !currentProblem) return;
-      e.preventDefault();
-      e.stopPropagation();
-      touchActive = true;
-      const touch = e.touches[0];
-      const grid  = touchToGrid(touch);
-      if (grid) {
-        pendingMove = grid;
-        showGhost(grid[0], grid[1], board?.getColor?.() || 'B');
-      }
-    }
-
-    function onTouchMove(e) {
-      if (!touchActive) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const touch = e.touches[0];
-      const grid  = touchToGrid(touch);
-      if (grid) {
-        pendingMove = grid;
-        showGhost(grid[0], grid[1], board?.getColor?.() || 'B');
-      } else {
-        pendingMove = null;
-        hideGhost();
-      }
-    }
-
-    function onTouchEnd(e) {
-      if (!touchActive) return;
-      e.preventDefault();
-      e.stopPropagation();
-      touchActive = false;
-      hideGhost();
-
-      if (pendingMove && !solved && currentProblem) {
-        const [col, row] = pendingMove;
-        pendingMove = null;
-        // Animate the stone placement
-        onMovePlayed(col, row);
-      }
-    }
-
-    function onTouchCancel(e) {
-      touchActive = false;
-      pendingMove = null;
-      hideGhost();
     }
 
     // ── Handle user move ─────────────────────────────────────────
