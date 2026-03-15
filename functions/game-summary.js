@@ -86,7 +86,11 @@ exports.handler = async (event) => {
         model: CLAUDE_MODEL,
         max_tokens: 600,
         system: `You are a Go tutor summarizing a student's game. Respond ONLY with valid JSON, no markdown:
-{"overallComment":"2-3 sentence assessment","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences"}],"studyTopic":"one concept to focus on"}
+{"overallComment":"2-3 sentence assessment","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences"}],"studyTopic":"one concept to focus on","studyKeyword":"SenseiLibraryTopic"}
+
+studyKeyword must be a Sensei's Library wiki page name (PascalCase, no spaces) for the concept in studyTopic. Use ONLY well-known page names from this list:
+Atari, Ladder, Net, Snapback, Ko, KoFight, Seki, LifeAndDeath, Eye, FalseEye, TwoEyes, Cutting, Connecting, CrossCut, Joseki, Fuseki, Tesuji, Sente, Gote, Tenuki, Thickness, Influence, Territory, Moyo, Invasion, Reduction, Endgame, Yose, Shape, GoodShape, EmptyTriangle, Hane, Keima, Kosumi, Nobi, Tobi, Peep, Probe, Sacrifice, Semeai, CapturingRace, LadderBreaker, Aji, Sabaki, Shinogi, Overplay, Direction, BigPoint, Komi, Handicap.
+If none of these match, use the closest one.
 
 ACCURACY RULES — follow strictly:
 - Only include keyMoments you can actually identify from the SGF or KataGo data (captures, ko fights, large territory swings, obvious atari sequences). If you cannot point to a specific, verifiable moment, omit it.
