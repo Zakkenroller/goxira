@@ -1,0 +1,12 @@
+{
+  "name": "katago-service",
+  "version": "1.0.0",
+  "description": "KataGo HTTP wrapper for Goxira",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
