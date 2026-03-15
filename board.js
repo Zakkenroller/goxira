@@ -567,6 +567,16 @@ const Board = (() => {
     const rect = svg.getBoundingClientRect();
     const vb   = svg.viewBox.baseVal;
 
+    // Reject touches outside the visible intersection of the SVG and the viewport.
+    // Without this, a finger on a part of the board scrolled off-screen still maps
+    // to a valid grid position, making it impossible to cancel by dragging off-screen.
+    const visLeft   = Math.max(rect.left,   0);
+    const visTop    = Math.max(rect.top,    0);
+    const visRight  = Math.min(rect.right,  window.innerWidth);
+    const visBottom = Math.min(rect.bottom, window.innerHeight);
+    if (e.clientX < visLeft || e.clientX > visRight ||
+        e.clientY < visTop  || e.clientY > visBottom) return null;
+
     // Use current viewBox (which may have been cropped) for correct mapping
     const vbW = vb.width  || total;
     const vbH = vb.height || total;
