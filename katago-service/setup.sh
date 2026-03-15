@@ -6,7 +6,7 @@
 set -euo pipefail
 
 KATAGO_VERSION="v1.15.3"
-KATAGO_BINARY_URL="https://github.com/lightvector/KataGo/releases/download/${KATAGO_VERSION}/katago-v1.15.3-eigenvalue-linux-x86_64.zip"
+KATAGO_BINARY_URL="https://github.com/lightvector/KataGo/releases/download/${KATAGO_VERSION}/katago-${KATAGO_VERSION}-eigen-linux-x64.zip"
 KATAGO_MODEL_URL="https://media.katagotraining.org/uploaded/networks/models/kata1/kata1-b15c192-s1672170752-d466197073.bin.gz"
 
 INSTALL_DIR="/opt/katago"
