@@ -598,8 +598,11 @@
         playerColor === 'B' ? (t.winrate ?? 0.5) : (1 - (t.winrate ?? 0.5))
       );
 
-      const xOf = i => (i / (N - 1)) * W;
-      const yOf = w => H - w * H;
+      // Use actual turnNumber for x-position so sampled data renders correctly
+      const maxTurn = winrateTurns[N - 1].turnNumber || 1;
+      const xOfTurn = turn => (turn / maxTurn) * W;
+      const xOf     = i    => xOfTurn(winrateTurns[i].turnNumber);
+      const yOf     = w    => H - w * H;
 
       // Area fill path
       const pts = wrArr.map((w, i) => `${xOf(i).toFixed(1)},${yOf(w).toFixed(1)}`).join(' L');
@@ -612,11 +615,9 @@
       const behindPts = wrArr.map((w, i) => `${xOf(i).toFixed(1)},${yOf(Math.min(w, 0.5)).toFixed(1)}`).join(' L');
       const behindArea = `M${xOf(0)},${yOf(0.5)} L${behindPts} L${xOf(N-1)},${yOf(0.5)} Z`;
 
-      // Key moment ticks
+      // Key moment ticks — position by actual move number regardless of sample rate
       const momentTicks = keyMoments.map(km => {
-        const t = winrateTurns.find(t => t.turnNumber === km.moveNumber);
-        const i = t ? winrateTurns.indexOf(t) : Math.round((km.moveNumber / moves.length) * (N-1));
-        const x = xOf(Math.min(i, N-1));
+        const x = xOfTurn(km.moveNumber);
         return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="0" y2="${H}" stroke="var(--accent)" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"/>`;
       }).join('');
 

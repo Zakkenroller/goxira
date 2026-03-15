@@ -262,8 +262,13 @@ const server = http.createServer(async (req, res) => {
       return respond(res, 200, { turns: [] });
     }
 
-    // Analyze every turn from 0 (initial) to moves.length (after last move)
-    const analyzeTurns = Array.from({ length: moves.length + 1 }, (_, i) => i);
+    // Sample turns to keep analysis fast for long games.
+    // Target at most ~20 data points; always include turn 0 and the last turn.
+    const totalTurns = moves.length + 1;
+    const step = Math.max(1, Math.ceil(totalTurns / 20));
+    const analyzeTurns = [];
+    for (let i = 0; i < totalTurns; i += step) analyzeTurns.push(i);
+    if (analyzeTurns[analyzeTurns.length - 1] !== moves.length) analyzeTurns.push(moves.length);
 
     try {
       const results = await engine.queryAll({
