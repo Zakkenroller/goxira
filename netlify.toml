@@ -6,3 +6,9 @@
 [build]
   publish = "."
   functions = "functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[functions."game-summary"]
+  timeout = 26
