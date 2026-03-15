@@ -308,8 +308,20 @@
       const session = await Auth.getSession();
       if (!session) { location.href = '/auth.html'; return; }
 
-      const profile = await UserDB.getProfile(session.user.id);
-      if (!profile) { location.href = '/auth.html'; return; }
+      let profile = await UserDB.getProfile(session.user.id);
+      if (!profile) {
+        // New user arriving via Google OAuth — create their profile automatically.
+        // Google name comes through in session.user.user_metadata.
+        const meta = session.user.user_metadata || {};
+        const displayName = meta.full_name || meta.name || session.user.email.split('@')[0];
+        try {
+          profile = await UserDB.createProfile(session.user.id, displayName);
+        } catch(e) {
+          console.error('Profile creation failed:', e);
+          location.href = '/auth.html';
+          return;
+        }
+      }
 
       // Redirect to assessment if not done
       if (!profile.assessment_done) { location.href = '/assess.html'; return; }
