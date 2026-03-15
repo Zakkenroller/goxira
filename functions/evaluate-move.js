@@ -27,7 +27,101 @@ function stonesToKataGo(stones, boardSize) {
   });
 }
 
-// Call KataGo /analyze-position to evaluate a tsumego position after a player's move.
+// ── Local Go rules engine ─────────────────────────────────────────────────
+// Computes captures and atari states deterministically — no inference needed.
+// stones: { "col,row": "B"|"W" }
+
+function getGroup(stones, col, row) {
+  const color = stones[`${col},${row}`];
+  if (!color) return null;
+  const visited = new Set();
+  const queue = [[col, row]];
+  while (queue.length) {
+    const [c, r] = queue.pop();
+    const key = `${c},${r}`;
+    if (visited.has(key)) continue;
+    if (stones[key] !== color) continue;
+    visited.add(key);
+    queue.push([c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]);
+  }
+  return visited;
+}
+
+function getLiberties(stones, group, boardSize) {
+  const liberties = new Set();
+  for (const key of group) {
+    const [c, r] = key.split(',').map(Number);
+    for (const [nc, nr] of [[c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]]) {
+      if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
+      if (!stones[`${nc},${nr}`]) liberties.add(`${nc},${nr}`);
+    }
+  }
+  return liberties;
+}
+
+// Returns { captured: [{count, notations}], atari: [{count, liberty}] }
+// Describes what happens to OPPONENT stones after placing color at (col, row).
+function analyzeMove(initialStones, col, row, color, boardSize) {
+  const stones = Object.assign({}, initialStones);
+  const opponent = color === 'B' ? 'W' : 'B';
+  stones[`${col},${row}`] = color;
+
+  const captured = [];
+  const visitedCapture = new Set();
+
+  // Identify adjacent opponent groups and check for capture
+  for (const [nc, nr] of [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]]) {
+    if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
+    const nkey = `${nc},${nr}`;
+    if (stones[nkey] !== opponent || visitedCapture.has(nkey)) continue;
+    const group = getGroup(stones, nc, nr);
+    for (const k of group) visitedCapture.add(k);
+    if (getLiberties(stones, group, boardSize).size === 0) {
+      const notations = [...group].map(k => {
+        const [gc, gr] = k.split(',').map(Number);
+        return toGoNotation(gc, gr, boardSize);
+      }).sort();
+      captured.push({ count: group.size, notations });
+      for (const k of group) delete stones[k]; // remove captured stones
+    }
+  }
+
+  // After captures, identify adjacent opponent groups in atari (1 liberty)
+  const atari = [];
+  const visitedAtari = new Set();
+  for (const [nc, nr] of [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]]) {
+    if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
+    const nkey = `${nc},${nr}`;
+    if (stones[nkey] !== opponent || visitedAtari.has(nkey)) continue;
+    const group = getGroup(stones, nc, nr);
+    for (const k of group) visitedAtari.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size === 1) {
+      const [lc, lr] = [...libs][0].split(',').map(Number);
+      atari.push({ count: group.size, liberty: toGoNotation(lc, lr, boardSize) });
+    }
+  }
+
+  return { captured, atari };
+}
+
+function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
+  const parts = [];
+  for (const g of result.captured) {
+    parts.push(
+      `${toPlayWord} captures ${g.count} ${opponentWord} stone${g.count > 1 ? 's' : ''} (at ${g.notations.join(', ')})`
+    );
+  }
+  for (const g of result.atari) {
+    parts.push(
+      `puts ${g.count} ${opponentWord} stone${g.count > 1 ? 's' : ''} in atari — 1 liberty remaining at ${g.liberty}`
+    );
+  }
+  if (!parts.length) parts.push('no immediate captures or atari');
+  return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
+}
+
+// ── KataGo: objective position evaluation ────────────────────────────────
 // Returns { winrate, scoreLead, bestMove } or null if KataGo unavailable.
 async function katagoEval(initialStones, playerMove, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
@@ -62,25 +156,39 @@ exports.handler = async (event) => {
 
     const isCorrect = (col === problem.solution.move[0] && row === problem.solution.move[1]);
 
-    const studentMove   = toGoNotation(col, row, boardSize);
-    const correctMove   = toGoNotation(problem.solution.move[0], problem.solution.move[1], boardSize);
-    const setupNotation = stonesToGoNotation(problem.setup?.stones || {}, boardSize);
+    const studentMove = toGoNotation(col, row, boardSize);
+    const correctMove = toGoNotation(problem.solution.move[0], problem.solution.move[1], boardSize);
+    const toPlay      = problem.setup?.toPlay || 'B';
+    const setupStones = problem.setup?.stones || {};
 
-    // KataGo: get objective position evaluation after the player's move
-    const toPlay       = problem.setup?.toPlay || 'B';
-    const setupStones  = stonesToKataGo(problem.setup?.stones || {}, boardSize);
-    const katago       = await katagoEval(setupStones, [toPlay, studentMove], boardSize);
+    const toPlayWord  = toPlay === 'B' ? 'Black' : 'White';
+    const opponentWord = toPlay === 'B' ? 'White' : 'Black';
+
+    // ── Deterministic board analysis (no LLM, no hallucination) ──
+    const studentFacts = analyzeMove(setupStones, col, row, toPlay, boardSize);
+    const correctFacts = analyzeMove(
+      setupStones,
+      problem.solution.move[0], problem.solution.move[1],
+      toPlay, boardSize
+    );
+
+    const studentFactsStr = tacticalFactsString(studentFacts, studentMove, toPlayWord, opponentWord);
+    const correctFactsStr = tacticalFactsString(correctFacts, correctMove, toPlayWord, opponentWord);
+
+    // ── KataGo: win probability and score (async, non-blocking) ──
+    const katagoStones = stonesToKataGo(setupStones, boardSize);
+    const katago       = await katagoEval(katagoStones, [toPlay, studentMove], boardSize);
 
     let katagoContext = '';
     if (katago) {
-      const winPct    = Math.round((katago.winrate ?? 0.5) * 100);
-      const scoreStr  = katago.scoreLead != null
+      const winPct   = Math.round((katago.winrate ?? 0.5) * 100);
+      const scoreStr = katago.scoreLead != null
         ? `, score lead ${katago.scoreLead > 0 ? '+' : ''}${katago.scoreLead.toFixed(1)} pts`
         : '';
-      const bestStr   = (katago.bestMove && katago.bestMove !== studentMove)
+      const bestStr  = (katago.bestMove && katago.bestMove !== studentMove)
         ? ` KataGo's preferred move: ${katago.bestMove}.`
         : '';
-      katagoContext = `\nKataGo analysis after student's move: ${winPct}% for ${toPlay === 'B' ? 'Black' : 'White'}${scoreStr}.${bestStr}`;
+      katagoContext = `\nKataGo evaluation after student's move: ${winPct}% for ${toPlayWord}${scoreStr}.${bestStr}`;
     }
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -93,24 +201,28 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 300,
-        system: `You are a Go tutor evaluating a student's tsumego attempt. Be honest. Under 80 words. No markdown.
-If attempt 1 wrong: give a Socratic hint that points toward the key tactical idea — do not invent details not in the explanation.
-If attempt 2 wrong: give a more direct hint based strictly on the provided explanation.
-If attempt 3+ wrong: deliver the correct answer using the provided explanation verbatim — do not embellish or add tactical claims beyond what is given.
-If correct: explain briefly why the move works, staying within what the provided explanation says.
-Use proper Go notation (A1, B3 etc). Do not fabricate variations or continuations not provided.
-If KataGo analysis is provided, use the objective winrate and score numbers to give precise, accurate feedback — do not contradict them.
+        system: `You are a Go tutor evaluating a student's tsumego attempt. Be concise (under 80 words) and honest. No markdown.
 
-CRITICAL — BOARD READING IS FORBIDDEN:
-You cannot reliably compute liberty counts, atari states, or capture outcomes from a coordinate list. Do NOT claim a move "puts stones in atari", "leaves only N liberties", or "captures the group" unless that exact phrase appears in the provided explanation. Making false tactical claims harms students. Stick to what the explanation says.`,
+ACCURACY CONTRACT — READ THIS FIRST:
+Verified board facts are computed by a deterministic rules engine and provided below. These are ground truth.
+- Use the verified facts to make specific tactical statements (captures, atari, liberties).
+- Do NOT make any tactical claim not present in the verified facts. No inventing captures, atari, or variations.
+- If KataGo evaluation is provided, use its numbers verbatim. Do not contradict them.
+
+RESPONSE STYLE:
+Attempt 1 wrong → Socratic hint toward the key tactical concept. Do not reveal the answer coordinate.
+Attempt 2 wrong → More direct hint using the verified facts about the correct move.
+Attempt 3+ wrong → State the correct answer and explain it using only the verified facts.
+Correct → Confirm using the verified facts for why the move works.`,
         messages: [{
           role: 'user',
           content: `Problem: ${problem.description}
-Board setup (for reference only — do not compute tactics from coordinates): ${setupNotation}
 Student rank: ${rank}. Attempt #${attemptNumber}.
 Student played: ${studentMove}. Correct answer: ${correctMove}.
 Move is ${isCorrect ? 'CORRECT' : 'INCORRECT'}.
-${!isCorrect ? 'Correct explanation (use this verbatim, add nothing): ' + problem.solution.explanation : ''}${katagoContext}`
+
+${studentFactsStr}
+${isCorrect ? '' : correctFactsStr}${katagoContext}`,
         }],
       }),
     });
@@ -127,7 +239,7 @@ ${!isCorrect ? 'Correct explanation (use this verbatim, add nothing): ' + proble
         solution: isCorrect || attemptNumber >= 3 ? problem.solution : null,
       }),
     };
-  } catch(e) {
+  } catch (e) {
     console.error('evaluate-move error:', e);
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
   }
