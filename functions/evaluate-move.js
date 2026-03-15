@@ -96,18 +96,21 @@ exports.handler = async (event) => {
         system: `You are a Go tutor evaluating a student's tsumego attempt. Be honest. Under 80 words. No markdown.
 If attempt 1 wrong: give a Socratic hint that points toward the key tactical idea — do not invent details not in the explanation.
 If attempt 2 wrong: give a more direct hint based strictly on the provided explanation.
-If attempt 3+ wrong: deliver the correct answer using the provided explanation — do not embellish or add tactical claims beyond what is given.
+If attempt 3+ wrong: deliver the correct answer using the provided explanation verbatim — do not embellish or add tactical claims beyond what is given.
 If correct: explain briefly why the move works, staying within what the provided explanation says.
 Use proper Go notation (A1, B3 etc). Do not fabricate variations or continuations not provided.
-If KataGo analysis is provided, use the objective winrate and score numbers to give precise, accurate feedback — do not contradict them.`,
+If KataGo analysis is provided, use the objective winrate and score numbers to give precise, accurate feedback — do not contradict them.
+
+CRITICAL — BOARD READING IS FORBIDDEN:
+You cannot reliably compute liberty counts, atari states, or capture outcomes from a coordinate list. Do NOT claim a move "puts stones in atari", "leaves only N liberties", or "captures the group" unless that exact phrase appears in the provided explanation. Making false tactical claims harms students. Stick to what the explanation says.`,
         messages: [{
           role: 'user',
           content: `Problem: ${problem.description}
-Board setup: ${setupNotation}
+Board setup (for reference only — do not compute tactics from coordinates): ${setupNotation}
 Student rank: ${rank}. Attempt #${attemptNumber}.
 Student played: ${studentMove}. Correct answer: ${correctMove}.
 Move is ${isCorrect ? 'CORRECT' : 'INCORRECT'}.
-${!isCorrect ? 'Correct explanation: ' + problem.solution.explanation : ''}${katagoContext}`
+${!isCorrect ? 'Correct explanation (use this verbatim, add nothing): ' + problem.solution.explanation : ''}${katagoContext}`
         }],
       }),
     });

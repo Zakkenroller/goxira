@@ -63,12 +63,13 @@ async function enrichWithText(problem, rank) {
         model: CLAUDE_MODEL,
         max_tokens: 250,
         system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond ONLY with JSON, no markdown:
-{"description":"one sentence describing the task for ${toPlayWord} to play","hint":"Socratic hint pointing to the key tactical idea without revealing the answer coordinate","explanation":"one sentence describing the tactical idea behind the solution at ${solutionNote} — e.g. atari, capturing, cutting, connecting — without inventing specific variations you cannot see"}
+{"description":"one sentence describing the task for ${toPlayWord} to play","hint":"Socratic hint pointing to the key tactical idea without revealing the answer coordinate","explanation":"one sentence naming ${solutionNote} as the key move and describing the CATEGORY of the tactic (forcing move, sacrifice, key point, invasion) — do NOT claim to know the specific board outcome (no liberty counts, no atari claims, no capture confirmations) because you cannot see the board"}
 
-ACCURACY RULES:
-- You do not have the full board image, only the stone count and the solution coordinate. Do not invent specific tactical sequences or claim to see threats you cannot verify.
-- The explanation must describe the general tactical idea (capture, atari, cut, connect) — not fabricated move trees.
-- The hint must guide toward the concept, not a false promise about what the position contains.`,
+ACCURACY RULES — READ CAREFULLY:
+- You have only the solution coordinate and opponent stone count. You do NOT have the board layout.
+- FORBIDDEN: claiming the move "puts stones in atari", "leaves only one liberty", "captures the group", or any other claim about the specific board outcome. You cannot verify these.
+- ALLOWED: describing the move as a "forcing move", "key point", "attack on the corner group", "invasion", etc. — positional categories that do not require reading the board.
+- The hint must point toward the tactical concept without false specifics.`,
         messages: [{
           role: 'user',
           content: `${toPlayWord} to play on a ${board_size}x${board_size} board. ${opponent} has ${opponentCount} stones. Correct move is ${solutionNote}. Student rank: ${rank}.`,
