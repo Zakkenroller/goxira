@@ -498,7 +498,13 @@
       } catch(e) {
         console.error('Goxira move error:', e);
         document.getElementById('claude-thinking').classList.remove('show');
-        setCommentary('Goxira is regrouping — your turn.');
+        // Treat the failed turn as a forced pass so the game record stays legal
+        consecutivePasses++;
+        addSGFPass(claudeColor);
+        setCommentary('Goxira is regrouping — passing this turn.');
+        if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
+        updateTurnIndicator(playerColor);
+        board.setColor(playerColor);
         board.setInteractive(true);
         if (snapshot) enableUndo(snapshot);
       }
