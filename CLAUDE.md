@@ -1,5 +1,15 @@
 # Claude Notes
 
+## Project Vision
+
+Goxira is intended to be **permanently free** and eventually hyperscale. Every architectural and licensing decision should serve that goal.
+
+- **License**: Keep open and permissive. Avoid dependencies with restrictive licenses.
+- **Compute efficiency is a first-class concern**: not a nice-to-have. Design for low cost per user. A feature that costs $0.001/user at 1,000 users costs $1,000/day at 1,000,000. Think about this at every step.
+- **Scaling path**: Donations, grants, or institutional support are realistic funding paths if the project grows. Nothing about the architecture should foreclose those options or create vendor lock-in.
+- **Self-hostable**: Where possible, the stack should be something a motivated individual or institution can run themselves. Netlify + Supabase + a small VPS is a good model — all replaceable.
+- **KataGo** is GPL-licensed. The wrapper service should be kept architecturally separate from any component that could create licensing conflicts.
+
 ## Core Directive: Accuracy
 
 Goxira is a teaching tool. Inaccurate advice is worse than no advice — a student who internalizes a wrong lesson must first unlearn it.
