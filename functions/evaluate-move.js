@@ -200,7 +200,7 @@ exports.handler = async (event) => {
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 300,
+        max_tokens: 150,
         system: `You are a Go tutor evaluating a student's tsumego attempt. Be concise (under 80 words) and honest. No markdown.
 
 ACCURACY CONTRACT — READ THIS FIRST:

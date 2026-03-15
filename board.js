@@ -39,7 +39,7 @@ const Board = (() => {
     let   pulseLast    = false; // true only during the drawStones() call after place()
     let   pendingPos   = null;  // key of stone awaiting auto-confirm, or null
     let   pendingTimer = null;  // setTimeout handle for auto-confirm
-    const CONFIRM_DELAY = 800;  // ms before a pending stone auto-confirms
+    const CONFIRM_DELAY = 500;  // ms before a pending stone auto-confirms
 
     // Build SVG
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -124,8 +124,8 @@ const Board = (() => {
     let activeTouchId = null;
 
     // Minimum ghost stone radius in screen pixels for touch.
-    // Large enough to peek out around a fingertip on any board size.
-    const TOUCH_GHOST_PX = 22;
+    // Targets ~2 cm diameter on a typical phone so the stone is visible above the fingertip.
+    const TOUCH_GHOST_PX = 44;
 
     overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
@@ -175,7 +175,9 @@ const Board = (() => {
       drawPending(pos);
       pendingTimer = setTimeout(() => {
         pendingPos = null; pendingTimer = null;
-        clearHover();
+        // Keep a solid "judging" stone visible while the API evaluates.
+        // clearJudging() / board.place() will dismiss it when the result arrives.
+        drawJudging(pos);
         if (onMove) onMove(pos.col, pos.row);
       }, CONFIRM_DELAY);
     });
@@ -410,9 +412,9 @@ const Board = (() => {
       c.setAttribute('cx', String(x)); c.setAttribute('cy', String(y));
       c.setAttribute('r', String(ghostR));
       if (currentColor === 'B') {
-        c.setAttribute('fill', 'rgba(26,20,16,0.55)');
+        c.setAttribute('fill', 'rgba(26,20,16,0.75)');
       } else {
-        c.setAttribute('fill', 'rgba(249,246,240,0.82)');
+        c.setAttribute('fill', 'rgba(249,246,240,0.92)');
         c.setAttribute('stroke', COLORS.stoneStroke);
         c.setAttribute('stroke-width', '1');
       }
@@ -463,6 +465,51 @@ const Board = (() => {
       ring.appendChild(anim);
     }
 
+    // Draw a solid stone in hoverGroup while the move is being judged.
+    // Looks identical to a placed stone so there is no visual gap.
+    // Dismissed by clearJudging() (wrong) or place() (correct).
+    function drawJudging(pos) {
+      hoverGroup.innerHTML = '';
+      const x = px(pos.col);
+      const y = px(pos.row);
+      const r = CELL * 0.46;
+      // Shadow
+      const shadow = el(hoverGroup, 'circle');
+      shadow.setAttribute('cx', x + 1.5); shadow.setAttribute('cy', y + 1.5);
+      shadow.setAttribute('r', String(r));
+      shadow.setAttribute('fill', 'rgba(0,0,0,0.25)');
+      shadow.setAttribute('pointer-events', 'none');
+      // Stone body
+      const c = el(hoverGroup, 'circle');
+      c.setAttribute('cx', String(x)); c.setAttribute('cy', String(y)); c.setAttribute('r', String(r));
+      c.setAttribute('pointer-events', 'none');
+      if (currentColor === 'B') {
+        c.setAttribute('fill', COLORS.stoneBlack);
+        const hl = el(hoverGroup, 'ellipse');
+        hl.setAttribute('cx', x - r * 0.25); hl.setAttribute('cy', y - r * 0.25);
+        hl.setAttribute('rx', r * 0.35); hl.setAttribute('ry', r * 0.2);
+        hl.setAttribute('fill', 'rgba(255,255,255,0.18)');
+        hl.setAttribute('transform', `rotate(-30, ${x}, ${y})`);
+        hl.setAttribute('pointer-events', 'none');
+      } else {
+        c.setAttribute('fill', COLORS.stoneWhite);
+        c.setAttribute('stroke', COLORS.stoneStroke);
+        c.setAttribute('stroke-width', '0.5');
+      }
+      // Small pulsing dot to signal "waiting for result"
+      const dot = el(hoverGroup, 'circle');
+      dot.setAttribute('cx', String(x)); dot.setAttribute('cy', String(y));
+      dot.setAttribute('r', String(r * 0.18));
+      dot.setAttribute('fill', currentColor === 'B' ? 'rgba(255,255,255,0.6)' : 'rgba(80,50,10,0.5)');
+      dot.setAttribute('pointer-events', 'none');
+      const anim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+      anim.setAttribute('attributeName', 'opacity');
+      anim.setAttribute('values', '0.3;1;0.3');
+      anim.setAttribute('dur', '0.9s');
+      anim.setAttribute('repeatCount', 'indefinite');
+      dot.appendChild(anim);
+    }
+
     function clearHover() { hoverGroup.innerHTML = ''; hoverPos = null; }
 
     // ── Public API ──
@@ -472,6 +519,7 @@ const Board = (() => {
        * Returns { captured: N } or { illegal: true } for suicide moves.
        */
       place(col, row, color) {
+        clearHover(); // dismiss any judging/ghost stone before placing the real one
         const key = `${col},${row}`;
         if (stones[key]) return { illegal: true };
 
@@ -524,6 +572,7 @@ const Board = (() => {
       clearMarkers() { markers = {}; drawMarkers(); },
 
       setInteractive(v) { interactive = v; overlay.style.cursor = v ? 'crosshair' : 'default'; },
+      clearJudging() { clearHover(); },
 
       getStones() { return { ...stones }; },
       getSize()   { return N; },
