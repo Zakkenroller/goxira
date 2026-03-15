@@ -232,10 +232,16 @@ const server = http.createServer(async (req, res) => {
         return respond(res, 200, { move: { col: -1, row: -1, thinking: "I'll pass." } });
       }
 
-      const coords = gtpToCoords(best.move, boardSize);
-      const winPct = Math.round((result.rootInfo?.winrate ?? 0.5) * 100);
+      const coords    = gtpToCoords(best.move, boardSize);
+      const winrate   = result.rootInfo?.winrate   ?? 0.5;
+      const scoreLead = result.rootInfo?.scoreLead ?? null;
+      const winPct    = Math.round(winrate * 100);
 
-      return respond(res, 200, { move: { ...coords, thinking: `Winrate ${winPct}%` } });
+      return respond(res, 200, {
+        move: { ...coords, thinking: `Winrate ${winPct}%` },
+        winrate,
+        scoreLead,
+      });
 
     } catch (e) {
       console.error('/move error:', e.message);
@@ -287,6 +293,41 @@ const server = http.createServer(async (req, res) => {
       return respond(res, 500, { error: e.message });
     }
   }
+
+  // POST /analyze-position — analyze a tsumego/problem position given stones (not SGF)
+  // Input: { initialStones: [["B","D5"],["W","E5"]], moves: [["B","G4"]], boardSize }
+  // Output: { winrate, scoreLead, bestMove }
+  if (req.url === '/analyze-position') {
+    const { initialStones, moves, boardSize } = body;
+    if (!boardSize) return respond(res, 400, { error: 'missing boardSize' });
+
+    const movesArr  = moves  || [];
+    const stonesArr = initialStones || [];
+
+    try {
+      const result = await engine.query({
+        initialStones: stonesArr,
+        moves:         movesArr,
+        rules:         'chinese',
+        komi:          komi(boardSize),
+        boardXSize:    boardSize,
+        boardYSize:    boardSize,
+        analyzeTurns:  [movesArr.length],
+        maxVisits:     100,
+      });
+
+      const best = result.moveInfos?.[0];
+      return respond(res, 200, {
+        winrate:   result.rootInfo?.winrate   ?? null,
+        scoreLead: result.rootInfo?.scoreLead ?? null,
+        bestMove:  best?.move ?? null,
+      });
+    } catch (e) {
+      console.error('/analyze-position error:', e.message);
+      return respond(res, 500, { error: e.message });
+    }
+  }
+
 
   return respond(res, 404, { error: 'not found' });
 });

@@ -448,14 +448,19 @@
       document.getElementById('claude-thinking').classList.add('show');
 
       try {
-        const res = await fetch('/.netlify/functions/claude-move', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sgf: buildSGF(), color: claudeColor, boardSize,
-            rank: getEffectiveRank(), currentStones: board.getStones(),
-          }),
-        }).then(r => r.json());
+        // Prefer KataGo for move generation; fall back to Claude if unavailable
+        const movePayload = JSON.stringify({
+          sgf: buildSGF(), color: claudeColor, boardSize,
+          rank: getEffectiveRank(), currentStones: board.getStones(),
+        });
+        let res = await fetch('/.netlify/functions/katago-move', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: movePayload,
+        }).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (!res?.move) {
+          res = await fetch('/.netlify/functions/claude-move', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: movePayload,
+          }).then(r => r.json());
+        }
 
         const move = res.move;
         document.getElementById('claude-thinking').classList.remove('show');
@@ -551,13 +556,37 @@
       document.getElementById('undo-btn').disabled = true;
 
       const title = reason === 'resign' ? 'You resigned' : 'Game complete';
-      const msg   = reason === 'resign'
+      let msg = reason === 'resign'
         ? 'Good game — review it to find where things went wrong.'
-        : 'Both players passed. Time to count the score!';
+        : 'Both players passed. Calculating score…';
 
       document.getElementById('game-over-title').textContent = title;
       document.getElementById('game-over-msg').textContent   = msg;
       document.getElementById('game-over-card').classList.add('show');
+
+      // Fetch KataGo score estimate for completed games (not resigns)
+      if (reason !== 'resign') {
+        fetch('/.netlify/functions/katago-move', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sgf: buildSGF(), color: playerColor, boardSize, rank: '1 dan' }),
+        }).then(r => r.ok ? r.json() : null).then(data => {
+          if (data?.scoreLead != null) {
+            const lead = data.scoreLead;
+            const ahead = (playerColor === 'B' ? lead > 0 : lead < 0);
+            const pts   = Math.abs(lead).toFixed(1);
+            const who   = ahead ? 'You lead' : 'Goxira leads';
+            document.getElementById('game-over-msg').textContent =
+              `${who} by ~${pts} points (KataGo estimate). Review to see how it played out.`;
+          } else {
+            document.getElementById('game-over-msg').textContent =
+              'Both players passed. Time to count the score!';
+          }
+        }).catch(() => {
+          document.getElementById('game-over-msg').textContent =
+            'Both players passed. Time to count the score!';
+        });
+      }
 
       try {
         const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play');
