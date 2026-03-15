@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile — Goxira</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-main { padding-top: 1.5rem; }
+
+    /* ── Profile hero ── */
+    .profile-hero {
+      background: var(--ink);
+      border-radius: var(--r-lg);
+      padding: 1.5rem;
+      color: var(--paper);
+      display: flex; align-items: center; gap: 1rem;
+      margin-bottom: 1.25rem;
+      animation: fadeUp 0.4s ease both;
+      position: relative; overflow: hidden;
+    }
+    .profile-hero::before {
+      content: '囲碁';
+      position: absolute; right: 1.5rem; top: 50%;
+      transform: translateY(-50%);
+      font-size: 5rem; opacity: 0.06;
+      font-family: var(--font-serif);
+      pointer-events: none;
+    }
+    .profile-hero__avatar {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: radial-gradient(circle at 38% 35%, rgba(255,255,255,0.25), rgba(255,255,255,0.05));
+      border: 2px solid rgba(255,255,255,0.15);
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; font-family: var(--font-serif);
+      color: rgba(255,255,255,0.5);
+    }
+    .profile-hero__info {}
+    .profile-hero__name {
+      font-size: 1.25rem; font-family: var(--font-serif);
+      font-weight: 600; color: var(--paper);
+    }
+    .profile-hero__rank {
+      font-size: 0.85rem; opacity: 0.6; margin-top: 0.2rem;
+    }
+
+    /* ── Stats ── */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem; margin-bottom: 1.75rem;
+      animation: fadeUp 0.4s ease 0.05s both;
+    }
+    .stat-card {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.9rem 0.75rem;
+      text-align: center;
+    }
+    .stat-card__value {
+      font-family: var(--font-serif);
+      font-size: 1.5rem; font-weight: 600;
+      color: var(--ink); line-height: 1;
+    }
+    .stat-card__label {
+      font-size: 0.68rem; color: var(--ink-faint);
+      margin-top: 0.3rem; text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Section header ── */
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0.875rem;
+    }
+    .section-header h2 { font-size: 1rem; color: var(--ink); }
+
+    /* ── Rank history ── */
+    .rank-list {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      margin-bottom: 1.75rem;
+      animation: fadeUp 0.4s ease 0.1s both;
+    }
+    .rank-item {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.75rem 1rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .rank-item__rank {
+      font-family: var(--font-serif);
+      font-size: 1rem; font-weight: 600;
+      color: var(--ink);
+    }
+    .rank-item__date {
+      font-size: 0.75rem; color: var(--ink-faint);
+    }
+    .rank-item__score {
+      font-size: 0.78rem; color: var(--ink-faint);
+      margin-top: 0.15rem;
+    }
+
+    /* ── Account section ── */
+    .account-section {
+      animation: fadeUp 0.4s ease 0.15s both;
+      margin-bottom: 2rem;
+    }
+    .account-row {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.875rem 1rem;
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    .account-row__label {
+      font-size: 0.875rem; color: var(--ink-faint);
+    }
+    .account-row__value {
+      font-size: 0.875rem; color: var(--ink); font-weight: 500;
+    }
+
+    .btn--danger {
+      background: #c0392b; color: white;
+      border: none;
+    }
+    .btn--danger:hover { background: #a93226; }
+
+    .empty-state {
+      text-align: center; padding: 1.5rem 1rem;
+      color: var(--ink-faint); font-size: 0.875rem;
+      background: white; border: 1px dashed var(--paper-deep);
+      border-radius: var(--r-lg);
+    }
+
+    .bottom-nav { display: flex; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <a href="home.html" class="nav__logo">
+      <span class="nav__logo-stone"></span>
+      Goxira
+    </a>
+    <div class="nav__links">
+      <a href="problems.html" class="nav__link">Problems</a>
+      <a href="play.html" class="nav__link">Play</a>
+      <a href="review.html" class="nav__link">Review</a>
+      <a href="profile.html" class="nav__link active">Profile</a>
+    </div>
+  </nav>
+
+  <main class="page-main">
+    <div class="container">
+
+      <!-- Profile hero -->
+      <div class="profile-hero">
+        <div class="profile-hero__avatar" id="avatar-initial">◯</div>
+        <div class="profile-hero__info">
+          <p class="profile-hero__name" id="profile-name">Loading…</p>
+          <p class="profile-hero__rank" id="profile-rank"></p>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <p class="stat-card__value" id="stat-solved">—</p>
+          <p class="stat-card__label">Solved</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-card__value" id="stat-games">—</p>
+          <p class="stat-card__label">Games</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-card__value" id="stat-score">—</p>
+          <p class="stat-card__label">Rank pts</p>
+        </div>
+      </div>
+
+      <!-- Rank history -->
+      <div class="section-header">
+        <h2>Rank History</h2>
+      </div>
+      <div class="rank-list" id="rank-list">
+        <div class="empty-state">No rank changes recorded yet.</div>
+      </div>
+
+      <!-- Account -->
+      <div class="section-header">
+        <h2>Account</h2>
+      </div>
+      <div class="account-section">
+        <div class="account-row">
+          <span class="account-row__label">Email</span>
+          <span class="account-row__value" id="account-email">—</span>
+        </div>
+        <div class="account-row">
+          <span class="account-row__label">Member since</span>
+          <span class="account-row__value" id="account-since">—</span>
+        </div>
+        <button class="btn btn--danger btn--full" onclick="signOut()" style="margin-top:0.75rem;">
+          Sign Out
+        </button>
+      </div>
+
+    </div>
+  </main>
+
+  <nav class="bottom-nav">
+    <div class="bottom-nav__item" onclick="location.href='home.html'">
+      <span class="bottom-nav__icon">⊞</span>Home
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='problems.html'">
+      <span class="bottom-nav__icon">🧩</span>Problems
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='play.html'">
+      <span class="bottom-nav__icon">⚫</span>Play
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='review.html'">
+      <span class="bottom-nav__icon">🔍</span>Review
+    </div>
+    <div class="bottom-nav__item active" onclick="location.href='profile.html'">
+      <span class="bottom-nav__icon">◯</span>Profile
+    </div>
+  </nav>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+  <script>
+    window.GOTUTOR_CONFIG = {
+      supabaseUrl:     'https://humvrkmlvhzwoawoyslu.supabase.co',
+      supabaseAnonKey: 'sb_publishable_dEQVVToEQh35MPrBEtKkmQ_om0ty8-r',
+    };
+  </script>
+  <script src="supabase-client.js"></script>
+  <script src="api.js"></script>
+  <script>
+    async function init() {
+      const session = await Auth.getSession();
+      if (!session) { location.href = 'auth.html'; return; }
+
+      const userId = session.user.id;
+      const profile = await UserDB.getProfile(userId);
+      if (!profile) { location.href = 'auth.html'; return; }
+
+      // Hero
+      const initial = (profile.display_name || 'S')[0].toUpperCase();
+      document.getElementById('avatar-initial').textContent = initial;
+      document.getElementById('profile-name').textContent = profile.display_name;
+      document.getElementById('profile-rank').textContent = profile.current_rank;
+
+      // Stats
+      document.getElementById('stat-score').textContent = profile.rank_score;
+
+      const [{ data: attempts }, { data: games }] = await Promise.all([
+        sb.from('problem_attempts').select('id, solved').eq('user_id', userId),
+        sb.from('saved_games').select('id').eq('user_id', userId),
+      ]);
+      const solved = (attempts || []).filter(a => a.solved).length;
+      document.getElementById('stat-solved').textContent = solved;
+      document.getElementById('stat-games').textContent = (games || []).length;
+
+      // Rank history
+      const { data: history } = await sb
+        .from('rank_history')
+        .select('rank, rank_score, recorded_at')
+        .eq('user_id', userId)
+        .order('recorded_at', { ascending: false })
+        .limit(10);
+
+      const rankList = document.getElementById('rank-list');
+      if (history && history.length) {
+        rankList.innerHTML = history.map(h => {
+          const date = new Date(h.recorded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          return `
+            <div class="rank-item">
+              <div>
+                <p class="rank-item__rank">${h.rank}</p>
+                <p class="rank-item__score">${h.rank_score} pts</p>
+              </div>
+              <span class="rank-item__date">${date}</span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // Account
+      document.getElementById('account-email').textContent = session.user.email || '—';
+      const since = new Date(profile.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      document.getElementById('account-since').textContent = since;
+    }
+
+    async function signOut() {
+      try { await Auth.signOut(); } catch(e) { location.href = 'index.html'; }
+    }
+
+    init();
+  </script>
+</body>
+</html>

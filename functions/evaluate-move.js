@@ -1,4 +1,4 @@
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const GOCOLS = 'ABCDEFGHJKLMNOPQRST'; // standard Go notation skips I
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
