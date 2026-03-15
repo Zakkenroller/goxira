@@ -110,8 +110,11 @@ ACCURACY RULES — follow strictly:
     if (!res.ok) {
       throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
     }
-    const text = data.content[0].text.replace(/```json|```/g, '').trim();
-    const summary = JSON.parse(text);
+    const raw  = data.content[0].text;
+    // Extract JSON object even if Claude adds preamble/postamble text
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
+    const summary = JSON.parse(match[0]);
     return { statusCode: 200, headers, body: JSON.stringify({ summary, turns: katagoResult?.turns ?? [] }) };
   } catch(e) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
