@@ -150,6 +150,64 @@
     .game-over-card h3 { color: var(--paper); font-size: 1.2rem; margin-bottom: 0.5rem; }
     .game-over-card p  { color: rgba(245,240,232,0.7); font-size: 0.875rem; margin-bottom: 1.25rem; }
 
+    /* ── Teaching pause ── */
+    .teaching-pause-overlay {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      align-items: flex-end; justify-content: center;
+      background: rgba(20,16,10,0.6); backdrop-filter: blur(4px);
+    }
+    .teaching-pause-overlay.show { display: flex; }
+    .teaching-pause-sheet {
+      width: 100%; max-width: 480px;
+      background: linear-gradient(180deg, var(--paper) 0%, var(--paper-warm) 100%);
+      border-radius: var(--r-lg) var(--r-lg) 0 0;
+      padding: 28px 24px 36px;
+      box-shadow: 0 -8px 40px rgba(0,0,0,0.25);
+      animation: tp-slide-up 0.5s cubic-bezier(0.16,1,0.3,1);
+    }
+    @keyframes tp-slide-up { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .tp-handle { width: 48px; height: 4px; border-radius: 2px; background: var(--paper-deep); margin: 0 auto 20px; }
+    .tp-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .tp-avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #3a3a3a, #111);
+      border: 2px solid var(--paper-deep);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .tp-name { font-family: var(--font-serif); font-size: 15px; font-weight: 700; color: var(--ink); }
+    .tp-label { font-family: var(--font-sans); font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+    .tp-message {
+      background: white; border: 1px solid var(--paper-deep); border-left: 3px solid var(--board-dark);
+      border-radius: var(--r-md); padding: 16px 18px; margin-bottom: 14px; min-height: 60px;
+      font-family: var(--font-serif); font-size: 15px; line-height: 1.6; color: var(--ink);
+    }
+    .tp-note {
+      background: rgba(139,105,20,0.06); border-radius: var(--r-md);
+      padding: 12px 16px; margin-bottom: 18px;
+      font-family: var(--font-serif); font-size: 13px; line-height: 1.55;
+      color: var(--ink-light); font-style: italic;
+    }
+    .tp-actions { display: flex; flex-direction: column; gap: 10px; }
+    .tp-actions .btn--primary-tp {
+      font-family: var(--font-serif); font-size: 15px; font-weight: 600;
+      padding: 14px 20px; background: var(--ink); color: var(--paper);
+      border: none; border-radius: var(--r-md); cursor: pointer;
+      box-shadow: var(--shadow-md); transition: opacity 0.2s;
+    }
+    .tp-actions .btn--secondary-tp {
+      font-family: var(--font-sans); font-size: 13px;
+      padding: 12px 20px; background: transparent; color: var(--ink-faint);
+      border: 1px solid var(--paper-deep); border-radius: var(--r-md); cursor: pointer;
+    }
+    .tp-actions .btn--equal-tp {
+      flex: 1; font-family: var(--font-serif); font-size: 14px; font-weight: 600;
+      padding: 14px 16px; border-radius: var(--r-md); cursor: pointer; transition: opacity 0.2s;
+    }
+    .tp-actions .btn--dismiss {
+      font-family: var(--font-sans); font-size: 12px; padding: 8px;
+      background: transparent; color: var(--ink-faint); border: none; cursor: pointer;
+    }
+
     .bottom-nav { display: flex; }
   </style>
 </head>
@@ -252,6 +310,23 @@
           </div>
         </div>
 
+        <!-- Teaching Pause Modal -->
+        <div class="teaching-pause-overlay" id="teaching-pause">
+          <div class="teaching-pause-sheet">
+            <div class="tp-handle"></div>
+            <div class="tp-header">
+              <div class="tp-avatar"></div>
+              <div>
+                <div class="tp-name">Goxira</div>
+                <div class="tp-label">Teaching Pause</div>
+              </div>
+            </div>
+            <div class="tp-message" id="tp-message"></div>
+            <div class="tp-note" id="tp-note" style="display:none"></div>
+            <div class="tp-actions" id="tp-actions"></div>
+          </div>
+        </div>
+
         <div class="game-controls">
           <button class="btn btn--secondary" onclick="passTurn()">Pass</button>
           <button class="btn btn--secondary" id="undo-btn" onclick="undoMove()" disabled>↩ Undo</button>
@@ -307,6 +382,8 @@
     let userId            = null;
     let userProfile       = null;
     let savedGameId       = null;
+    let teachingPauseFired = false;
+    let teachingPauseSuppressed = false;
 
     async function init() {
       const session = await Auth.getSession();
@@ -468,6 +545,12 @@
         if (move.col === -1 && move.row === -1) {
           consecutivePasses++;
           addSGFPass(claudeColor);
+          // Teaching pause: first deliberate pass triggers the modal
+          if (shouldTeachingPause()) {
+            setCommentary('Goxira would like to pause and reflect on the game.');
+            showTeachingPause(snapshot);
+            return;
+          }
           setCommentary(`Goxira passes. ${move.thinking || ''}`);
           if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
         } else {
@@ -616,6 +699,86 @@
       return `${who} — ${winner} by ${diff.toFixed(1)} points (area scoring, ${score.komi} komi).`;
     }
 
+    // ── Teaching pause ──────────────────────────────────────────
+    function getRankTier() {
+      const rank  = userProfile?.current_rank || '20 kyu';
+      const match = rank.match(/(\d+)\s*(kyu|dan)/);
+      if (!match) return 'beginner';
+      if (match[2] === 'dan') return 'advanced';
+      const kyu = parseInt(match[1]);
+      if (kyu >= 16) return 'beginner';
+      if (kyu >= 7) return 'intermediate';
+      return 'advanced';
+    }
+
+    function shouldTeachingPause() {
+      if (teachingPauseFired || teachingPauseSuppressed || gameOver) return false;
+      if (moveNumber < 10) return false; // too early to pause
+      return true;
+    }
+
+    function showTeachingPause(snapshot) {
+      teachingPauseFired = true;
+      const tier = getRankTier();
+      const overlay = document.getElementById('teaching-pause');
+      const msgEl   = document.getElementById('tp-message');
+      const noteEl  = document.getElementById('tp-note');
+      const actEl   = document.getElementById('tp-actions');
+
+      // Rank-adaptive messaging
+      if (tier === 'beginner') {
+        msgEl.textContent = "I think the big fights are settled. This is a great time to practice reading the board — knowing when the game shifts from fighting to counting is one of the hardest skills in Go.";
+        noteEl.style.display = 'block';
+        noteEl.textContent   = "Let\u2019s keep playing so you can practice endgame moves \u2014 every point matters! I\u2019ll keep coaching you through it.";
+        actEl.innerHTML = `
+          <button class="btn--primary-tp" onclick="teachingPauseContinue()">Keep playing \u2014 practice the endgame</button>
+          <button class="btn--secondary-tp" onclick="teachingPauseReview()">Skip to game review</button>`;
+      } else if (tier === 'intermediate') {
+        msgEl.textContent = "The borders look mostly decided. Want to play out the endgame, or jump to the review?";
+        noteEl.style.display = 'block';
+        noteEl.textContent   = "At your level, recognizing when to transition to endgame play is an important skill. The remaining moves are mostly about efficiently claiming the last few points.";
+        actEl.innerHTML = `
+          <div style="display:flex;gap:10px">
+            <button class="btn--equal-tp" style="background:white;color:var(--ink);border:1.5px solid var(--paper-deep)" onclick="teachingPauseContinue()">Play endgame</button>
+            <button class="btn--equal-tp" style="background:var(--ink);color:var(--paper);border:none;box-shadow:var(--shadow-md)" onclick="teachingPauseReview()">Jump to review</button>
+          </div>`;
+      } else {
+        msgEl.textContent = "The borders look mostly decided. Want to continue, or jump to the review?";
+        noteEl.style.display = 'none';
+        actEl.innerHTML = `
+          <div style="display:flex;gap:10px">
+            <button class="btn--equal-tp" style="background:white;color:var(--ink);border:1.5px solid var(--paper-deep)" onclick="teachingPauseContinue()">Play endgame</button>
+            <button class="btn--equal-tp" style="background:var(--ink);color:var(--paper);border:none;box-shadow:var(--shadow-md)" onclick="teachingPauseReview()">Jump to review</button>
+          </div>
+          <button class="btn--dismiss" onclick="teachingPauseDismiss()">Don\u2019t show these pauses anymore</button>`;
+      }
+
+      // Store snapshot so we can resume if player continues
+      overlay._snapshot = snapshot;
+      overlay.classList.add('show');
+    }
+
+    function teachingPauseContinue() {
+      const overlay  = document.getElementById('teaching-pause');
+      const snapshot = overlay._snapshot;
+      overlay.classList.remove('show');
+      // The pass was already recorded — just hand turn back to player
+      updateTurnIndicator(playerColor);
+      board.setColor(playerColor);
+      board.setInteractive(true);
+      if (snapshot) enableUndo(snapshot);
+    }
+
+    function teachingPauseReview() {
+      document.getElementById('teaching-pause').classList.remove('show');
+      endGame('teaching-pause');
+    }
+
+    function teachingPauseDismiss() {
+      teachingPauseSuppressed = true;
+      teachingPauseContinue();
+    }
+
     // ── End game ─────────────────────────────────────────────────
     async function endGame(reason) {
       gameOver = true;
@@ -623,9 +786,12 @@
       document.getElementById('claude-thinking').classList.remove('show');
       document.getElementById('undo-btn').disabled = true;
 
-      const title = reason === 'resign' ? 'You resigned' : 'Game complete';
+      const title = reason === 'resign' ? 'You resigned'
+        : reason === 'teaching-pause' ? 'Game review' : 'Game complete';
       let msg = reason === 'resign'
         ? 'Good game — review it to find where things went wrong.'
+        : reason === 'teaching-pause'
+        ? 'Good game! Let\u2019s see how it played out.'
         : 'Both players passed. Calculating score…';
 
       document.getElementById('game-over-title').textContent = title;
