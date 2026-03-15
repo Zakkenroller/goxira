@@ -104,7 +104,7 @@ ACCURACY RULES — follow strictly:
     const data = await res.json();
     const text = data.content[0].text.replace(/```json|```/g, '').trim();
     const summary = JSON.parse(text);
-    return { statusCode: 200, headers, body: JSON.stringify({ summary }) };
+    return { statusCode: 200, headers, body: JSON.stringify({ summary, turns: katagoResult?.turns ?? [] }) };
   } catch(e) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
   }
