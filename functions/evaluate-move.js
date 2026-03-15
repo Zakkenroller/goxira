@@ -45,11 +45,12 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 300,
-        system: `You are a Go tutor evaluating a student's move. Be encouraging but honest. Under 80 words. No markdown.
-If attempt 1 wrong: give a Socratic hint without revealing the answer.
-If attempt 2 wrong: give a more direct hint pointing to the key area.
-If attempt 3+ wrong: explain the correct answer clearly.
-If correct: explain briefly why the move works. Use proper Go notation (A1, B3 etc).`,
+        system: `You are a Go tutor evaluating a student's tsumego attempt. Be honest. Under 80 words. No markdown.
+If attempt 1 wrong: give a Socratic hint that points toward the key tactical idea — do not invent details not in the explanation.
+If attempt 2 wrong: give a more direct hint based strictly on the provided explanation.
+If attempt 3+ wrong: deliver the correct answer using the provided explanation — do not embellish or add tactical claims beyond what is given.
+If correct: explain briefly why the move works, staying within what the provided explanation says.
+Use proper Go notation (A1, B3 etc). Do not fabricate variations or continuations not provided.`,
         messages: [{
           role: 'user',
           content: `Problem: ${problem.description}
