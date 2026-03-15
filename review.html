@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Review — Goxira</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-main { padding-top: 1.25rem; }
+
+    /* ── Game list ── */
+    .section-title {
+      font-family: var(--font-serif); font-size: 1.1rem;
+      margin-bottom: 0.75rem; color: var(--ink);
+    }
+    .game-card {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.8rem 1rem; margin-bottom: 0.5rem;
+      background: white; border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md); cursor: pointer;
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
+    .game-card:active { transform: scale(0.98); }
+    .game-card__meta { font-size: 0.8rem; color: var(--ink-faint); margin-top: 2px; }
+    .game-card__arrow { color: var(--ink-faint); font-size: 1.1rem; }
+    .empty-state {
+      text-align: center; padding: 3rem 1rem;
+      color: var(--ink-faint); font-size: 0.9rem;
+    }
+
+    /* ── Board ── */
+    .board-container {
+      background: var(--board); border-radius: var(--r-lg);
+      overflow: hidden; box-shadow: var(--shadow-lg);
+      margin-bottom: 0.75rem; position: relative;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    .board-container svg { width: 100% !important; height: auto !important; display: block; }
+
+    /* ── Replay controls ── */
+    .replay-controls {
+      display: flex; align-items: center; justify-content: center;
+      gap: 0.5rem; margin-bottom: 0.75rem;
+    }
+    .replay-controls .btn {
+      padding: 0.4rem 0.7rem; font-size: 0.85rem; min-width: 2.4rem;
+    }
+    .move-counter {
+      font-family: var(--font-serif); font-size: 0.9rem;
+      color: var(--ink); min-width: 90px; text-align: center;
+    }
+
+    /* ── Winrate chart ── */
+    .winrate-wrap {
+      margin-bottom: 0.75rem;
+      border-radius: var(--r-md); overflow: hidden;
+      border: 1px solid var(--paper-deep);
+      position: relative; cursor: pointer;
+    }
+    .winrate-wrap svg { display: block; width: 100%; }
+    .winrate-label {
+      font-size: 0.65rem; color: var(--ink-faint);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 0.2rem;
+    }
+    .winrate-skeleton {
+      height: 64px; background: var(--paper-warm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.8rem; color: var(--ink-faint);
+    }
+
+    /* ── Analysis section ── */
+    .analysis-section { margin-bottom: 1.5rem; }
+    .analysis-loading {
+      padding: 1rem; text-align: center;
+      font-size: 0.85rem; color: var(--ink-faint);
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    }
+    .overall-comment {
+      background: var(--paper-warm); border: 1px solid var(--paper-deep);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--r-md); padding: 0.75rem 1rem;
+      font-family: var(--font-serif); font-size: 0.9rem; line-height: 1.6;
+      color: var(--ink-light); margin-bottom: 0.75rem;
+    }
+    .study-topic {
+      background: rgba(139,58,30,0.07); border: 1px solid rgba(139,58,30,0.2);
+      border-radius: var(--r-md); padding: 0.6rem 1rem;
+      font-size: 0.85rem; color: var(--accent);
+      margin-bottom: 0.75rem;
+    }
+    .study-topic strong { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+
+    /* ── Key moments ── */
+    .moments-title { font-size: 0.75rem; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; }
+    .moment-card {
+      display: flex; gap: 0.75rem; align-items: flex-start;
+      padding: 0.65rem 0.85rem; margin-bottom: 0.4rem;
+      background: white; border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md); cursor: pointer;
+      transition: box-shadow 0.15s;
+    }
+    .moment-card:active { box-shadow: var(--shadow-md); }
+    .moment-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(139,58,30,0.15); }
+    .moment-num {
+      font-family: var(--font-serif); font-size: 0.85rem; font-weight: 600;
+      color: var(--ink-faint); min-width: 32px; padding-top: 1px;
+    }
+    .moment-body { flex: 1; }
+    .moment-title { font-size: 0.875rem; font-weight: 500; color: var(--ink); display: flex; align-items: center; gap: 0.4rem; }
+    .moment-badge {
+      font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; padding: 1px 5px; border-radius: 100px;
+    }
+    .moment-badge--mistake  { background: rgba(139,26,26,0.12); color: var(--wrong); }
+    .moment-badge--good     { background: rgba(45,106,79,0.12);  color: var(--correct); }
+    .moment-badge--critical { background: rgba(139,58,30,0.12);  color: var(--accent); }
+    .moment-explanation { font-size: 0.8rem; color: var(--ink-light); line-height: 1.5; margin-top: 2px; }
+
+    /* ── Mobile ── */
+    @media (max-width: 640px) {
+      .page-main  { padding-top: 0.5rem; }
+      .board-container {
+        height: min(calc(100vw - 2rem), calc(100dvh - 380px));
+        min-height: 200px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .board-container svg { height: 100% !important; width: auto !important; max-width: 100%; display: block; margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <a href="home.html" class="nav__logo">
+      <span class="nav__logo-stone"></span>
+      Goxira
+    </a>
+    <div class="nav__links">
+      <a href="problems.html" class="nav__link">Problems</a>
+      <a href="play.html"     class="nav__link">Play</a>
+      <a href="review.html"   class="nav__link active">Review</a>
+      <a href="profile.html"  class="nav__link">Profile</a>
+    </div>
+  </nav>
+
+  <main class="page-main">
+    <div class="container container--narrow">
+
+      <!-- ── Game list view ── -->
+      <div id="list-view">
+        <p class="section-title">Recent Games</p>
+        <div id="games-list">
+          <div class="analysis-loading">
+            <span class="loader"></span> Loading games…
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Review view (hidden until a game is loaded) ── -->
+      <div id="review-view" style="display:none">
+
+        <!-- Back button -->
+        <div style="margin-bottom:0.75rem">
+          <button class="btn btn--secondary" onclick="showList()" style="padding:0.35rem 0.75rem;font-size:0.8rem;">← All games</button>
+        </div>
+
+        <!-- Board -->
+        <div class="board-container" id="board-container"></div>
+
+        <!-- Replay controls -->
+        <div class="replay-controls">
+          <button class="btn btn--secondary" onclick="goToMove(0)" title="Start">⏮</button>
+          <button class="btn btn--secondary" onclick="stepMove(-1)" title="Previous">←</button>
+          <span class="move-counter" id="move-counter">Move 0 / 0</span>
+          <button class="btn btn--secondary" onclick="stepMove(1)"  title="Next">→</button>
+          <button class="btn btn--secondary" onclick="goToMove(moves.length)" title="End">⏭</button>
+        </div>
+
+        <!-- Winrate chart -->
+        <div style="margin-bottom:0.75rem">
+          <div class="winrate-label">Winrate — <span id="winrate-player-label">Black</span></div>
+          <div class="winrate-wrap" id="winrate-wrap">
+            <div class="winrate-skeleton" id="winrate-skeleton">Calculating…</div>
+            <svg id="winrate-svg" style="display:none" height="64"></svg>
+          </div>
+        </div>
+
+        <!-- Analysis -->
+        <div class="analysis-section" id="analysis-section">
+          <div class="analysis-loading" id="analysis-loading">
+            <span class="loader"></span> Analysing game…
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <nav class="bottom-nav">
+    <div class="bottom-nav__item" onclick="location.href='home.html'">
+      <span class="bottom-nav__icon">⊞</span>Home
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='problems.html'">
+      <span class="bottom-nav__icon">🧩</span>Problems
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='play.html'">
+      <span class="bottom-nav__icon">⚫</span>Play
+    </div>
+    <div class="bottom-nav__item active">
+      <span class="bottom-nav__icon">🔍</span>Review
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='profile.html'">
+      <span class="bottom-nav__icon">◯</span>Profile
+    </div>
+  </nav>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    window.GOTUTOR_CONFIG = {
+      supabaseUrl:     'https://humvrkmlvhzwoawoyslu.supabase.co',
+      supabaseAnonKey: 'sb_publishable_dEQVVToEQh35MPrBEtKkmQ_om0ty8-r',
+    };
+  </script>
+  <script src="supabase-client.js"></script>
+  <script src="api.js"></script>
+  <script src="board.js"></script>
+  <script>
+    // ── State ─────────────────────────────────────────────────────
+    let userId      = null;
+    let userProfile = null;
+    let board       = null;
+    let moves       = [];      // [{color, col, row, pass}]
+    let states      = [];      // states[i] = board.getStones() after move i (0 = empty)
+    let boardSize   = 19;
+    let currentMoveIndex = 0;
+    let keyMoments  = [];      // from game-summary
+    let winrateTurns = [];     // from KataGo
+    let playerColor = 'B';     // colour the logged-in user played
+
+    // ── Init ──────────────────────────────────────────────────────
+    async function init() {
+      const session = await Auth.getSession();
+      if (!session) { location.href = 'auth.html'; return; }
+      userId      = session.user.id;
+      userProfile = await UserDB.getProfile(userId);
+      if (!userProfile) { location.href = 'auth.html'; return; }
+
+      const id = new URLSearchParams(location.search).get('id');
+      if (id) {
+        await loadGame(id);
+      } else {
+        await loadGameList();
+      }
+    }
+
+    // ── Game list ─────────────────────────────────────────────────
+    async function loadGameList() {
+      const games = await UserDB.getGames(userId, 20);
+      const el    = document.getElementById('games-list');
+
+      if (!games.length) {
+        el.innerHTML = '<div class="empty-state">No games yet — play one first!</div>';
+        return;
+      }
+
+      el.innerHTML = '';
+      games.forEach(g => {
+        const date = new Date(g.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const div  = document.createElement('div');
+        div.className = 'game-card';
+        div.innerHTML = `
+          <div>
+            <div style="font-size:0.9rem;font-weight:500;color:var(--ink)">${g.board_size}×${g.board_size} game</div>
+            <div class="game-card__meta">${date}</div>
+          </div>
+          <span class="game-card__arrow">→</span>`;
+        div.onclick = () => { history.pushState({}, '', `review.html?id=${g.id}`); loadGame(g.id); };
+        el.appendChild(div);
+      });
+    }
+
+    function showList() {
+      document.getElementById('review-view').style.display = 'none';
+      document.getElementById('list-view').style.display   = 'block';
+      history.pushState({}, '', 'review.html');
+    }
+
+    // ── Load a specific game ──────────────────────────────────────
+    async function loadGame(id) {
+      document.getElementById('list-view').style.display   = 'none';
+      document.getElementById('review-view').style.display = 'block';
+
+      // Find game in Supabase
+      const games = await UserDB.getGames(userId, 50);
+      const game  = games.find(g => g.id === id);
+      if (!game) {
+        document.getElementById('analysis-section').innerHTML =
+          '<div class="analysis-loading">Game not found.</div>';
+        return;
+      }
+
+      boardSize   = game.board_size;
+      playerColor = 'B'; // default; we don't store player colour yet
+
+      // 1. Parse SGF
+      moves = parseSGF(game.sgf_content);
+
+      // 2. Pre-compute board states
+      precomputeStates();
+
+      // 3. Render board at move 0
+      board = Board.create(document.getElementById('board-container'), boardSize, null);
+      board.setInteractive(false);
+      goToMove(0);
+
+      // 4. Request game summary + KataGo analysis in background
+      API.gameSummary(game.sgf_content, boardSize, userProfile.current_rank, playerColor)
+        .then(data => {
+          renderAnalysis(data.summary);
+          if (data.turns?.length) {
+            winrateTurns = data.turns;
+            renderWinrateChart();
+          } else {
+            document.getElementById('winrate-skeleton').textContent = 'Analysis unavailable';
+          }
+        })
+        .catch(() => {
+          document.getElementById('analysis-loading').textContent = 'Analysis failed — try again later.';
+          document.getElementById('winrate-skeleton').textContent = 'Analysis unavailable';
+        });
+    }
+
+    // ── SGF parsing ───────────────────────────────────────────────
+    // Handles the format produced by play.html's buildSGF():
+    //   (;GM[1]FF[4]SZ[9];B[dd];W[ee];B[]...)
+    function parseSGF(sgf) {
+      const SGFCOLS = 'abcdefghijklmnopqrs';
+      boardSize = parseInt(sgf.match(/SZ\[(\d+)\]/)?.[1] || '19');
+      const result = [];
+      const re = /;([BW])\[([a-z]{0,2})\]/g;
+      let m;
+      while ((m = re.exec(sgf)) !== null) {
+        const coord = m[2];
+        if (!coord) {
+          result.push({ color: m[1], pass: true });
+        } else {
+          result.push({
+            color: m[1],
+            col:   SGFCOLS.indexOf(coord[0]),
+            row:   SGFCOLS.indexOf(coord[1]),
+            pass:  false,
+          });
+        }
+      }
+      return result;
+    }
+
+    // ── Pre-compute states ────────────────────────────────────────
+    // Replay SGF through a hidden temp board to store every board state.
+    // This lets goToMove() be O(1) via setState().
+    function precomputeStates() {
+      const tmp = document.createElement('div');
+      tmp.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;';
+      document.body.appendChild(tmp);
+
+      const tmpBoard = Board.create(tmp, boardSize, null);
+      states = [tmpBoard.getStones()]; // state 0 = empty
+
+      for (const move of moves) {
+        if (!move.pass) tmpBoard.place(move.col, move.row, move.color);
+        states.push(tmpBoard.getStones());
+      }
+
+      document.body.removeChild(tmp);
+    }
+
+    // ── Board navigation ──────────────────────────────────────────
+    function goToMove(n) {
+      n = Math.max(0, Math.min(n, moves.length));
+      board.setState(states[n], n > 0 && !moves[n-1].pass ? [moves[n-1].col, moves[n-1].row] : null);
+
+      // Highlight active key moment cards
+      keyMoments.forEach(km => {
+        const card = document.getElementById(`km-${km.moveNumber}`);
+        if (card) card.classList.toggle('active', km.moveNumber === n);
+      });
+
+      currentMoveIndex = n;
+      updateMoveCounter();
+      updateWinrateScrubber();
+    }
+
+    function stepMove(delta) { goToMove(currentMoveIndex + delta); }
+
+    function updateMoveCounter() {
+      document.getElementById('move-counter').textContent =
+        `Move ${currentMoveIndex} / ${moves.length}`;
+    }
+
+    // ── Keyboard navigation ───────────────────────────────────────
+    document.addEventListener('keydown', e => {
+      if (document.getElementById('review-view').style.display === 'none') return;
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); stepMove(-1); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); stepMove(1); }
+      if (e.key === 'Home')       { e.preventDefault(); goToMove(0); }
+      if (e.key === 'End')        { e.preventDefault(); goToMove(moves.length); }
+    });
+
+    // ── Winrate chart ─────────────────────────────────────────────
+    function renderWinrateChart() {
+      const skeleton = document.getElementById('winrate-skeleton');
+      const svg      = document.getElementById('winrate-svg');
+      const wrap     = document.getElementById('winrate-wrap');
+      const H        = 64;
+      const W        = wrap.clientWidth || 320;
+      const N        = winrateTurns.length;
+      if (N < 2) { skeleton.textContent = 'Not enough data'; return; }
+
+      document.getElementById('winrate-player-label').textContent =
+        playerColor === 'B' ? 'Black' : 'White';
+
+      // Build the winrate array for the player
+      const wrArr = winrateTurns.map(t =>
+        playerColor === 'B' ? (t.winrate ?? 0.5) : (1 - (t.winrate ?? 0.5))
+      );
+
+      const xOf = i => (i / (N - 1)) * W;
+      const yOf = w => H - w * H;
+
+      // Area fill path
+      const pts = wrArr.map((w, i) => `${xOf(i).toFixed(1)},${yOf(w).toFixed(1)}`).join(' L');
+      const area = `M${xOf(0).toFixed(1)},${H} L${pts} L${xOf(N-1).toFixed(1)},${H} Z`;
+
+      // Split into "ahead" (green) and "behind" (red) segments
+      const aheadPts = wrArr.map((w, i) => `${xOf(i).toFixed(1)},${yOf(Math.max(w, 0.5)).toFixed(1)}`).join(' L');
+      const aheadArea = `M${xOf(0)},${yOf(0.5)} L${aheadPts} L${xOf(N-1)},${yOf(0.5)} Z`;
+
+      const behindPts = wrArr.map((w, i) => `${xOf(i).toFixed(1)},${yOf(Math.min(w, 0.5)).toFixed(1)}`).join(' L');
+      const behindArea = `M${xOf(0)},${yOf(0.5)} L${behindPts} L${xOf(N-1)},${yOf(0.5)} Z`;
+
+      // Key moment ticks
+      const momentTicks = keyMoments.map(km => {
+        const t = winrateTurns.find(t => t.turnNumber === km.moveNumber);
+        const i = t ? winrateTurns.indexOf(t) : Math.round((km.moveNumber / moves.length) * (N-1));
+        const x = xOf(Math.min(i, N-1));
+        return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="0" y2="${H}" stroke="var(--accent)" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"/>`;
+      }).join('');
+
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      svg.innerHTML = `
+        <rect width="${W}" height="${H}" fill="var(--paper-warm)"/>
+        <path d="${behindArea}" fill="rgba(139,26,26,0.18)"/>
+        <path d="${aheadArea}"  fill="rgba(45,106,79,0.18)"/>
+        <path d="${area}" fill="none" stroke="var(--ink-light)" stroke-width="1.5"/>
+        <line x1="0" x2="${W}" y1="${yOf(0.5).toFixed(1)}" y2="${yOf(0.5).toFixed(1)}"
+              stroke="var(--ink-faint)" stroke-width="0.75" stroke-dasharray="3,3"/>
+        ${momentTicks}
+        <line id="wr-scrubber" x1="0" x2="0" y1="0" y2="${H}"
+              stroke="var(--accent)" stroke-width="1.5" opacity="0.8"/>`;
+
+      skeleton.style.display = 'none';
+      svg.style.display      = 'block';
+
+      // Tap/click on chart → jump to that move
+      wrap.addEventListener('click', e => {
+        const rect = wrap.getBoundingClientRect();
+        const frac = (e.clientX - rect.left) / rect.width;
+        goToMove(Math.round(frac * moves.length));
+      });
+
+      updateWinrateScrubber();
+    }
+
+    function updateWinrateScrubber() {
+      const line = document.getElementById('wr-scrubber');
+      if (!line || !winrateTurns.length) return;
+      const W    = document.getElementById('winrate-wrap').clientWidth || 320;
+      const x    = ((currentMoveIndex / Math.max(moves.length, 1)) * W).toFixed(1);
+      line.setAttribute('x1', x);
+      line.setAttribute('x2', x);
+    }
+
+    // ── Analysis panel ────────────────────────────────────────────
+    function renderAnalysis(summary) {
+      keyMoments = summary.keyMoments || [];
+      const sec  = document.getElementById('analysis-section');
+      sec.innerHTML = '';
+
+      // Overall comment
+      if (summary.overallComment) {
+        const div = document.createElement('div');
+        div.className   = 'overall-comment';
+        div.textContent = summary.overallComment;
+        sec.appendChild(div);
+      }
+
+      // Key moments
+      if (keyMoments.length) {
+        const label = document.createElement('div');
+        label.className   = 'moments-title';
+        label.textContent = 'Key moments';
+        sec.appendChild(label);
+
+        keyMoments.forEach(km => {
+          const card = document.createElement('div');
+          card.className = 'moment-card';
+          card.id        = `km-${km.moveNumber}`;
+          const badgeClass = `moment-badge--${km.type || 'critical'}`;
+          card.innerHTML = `
+            <div class="moment-num">#${km.moveNumber}</div>
+            <div class="moment-body">
+              <div class="moment-title">
+                ${escHtml(km.title || '')}
+                <span class="moment-badge ${badgeClass}">${km.type || ''}</span>
+              </div>
+              <div class="moment-explanation">${escHtml(km.explanation || '')}</div>
+            </div>`;
+          card.onclick = () => goToMove(km.moveNumber);
+          sec.appendChild(card);
+        });
+      }
+
+      // Study topic
+      if (summary.studyTopic) {
+        const div = document.createElement('div');
+        div.className = 'study-topic';
+        div.innerHTML = `<strong>Study focus</strong>${escHtml(summary.studyTopic)}`;
+        sec.appendChild(div);
+      }
+
+      // Re-render winrate chart now that keyMoments are known (for ticks)
+      if (winrateTurns.length) renderWinrateChart();
+    }
+
+    function escHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    init();
+  </script>
+</body>
+</html>
