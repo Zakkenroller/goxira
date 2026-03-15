@@ -322,12 +322,12 @@
             winrateTurns = data.turns;
             renderWinrateChart();
           } else {
-            document.getElementById('winrate-skeleton').textContent = 'Analysis unavailable';
+            document.getElementById('winrate-wrap').parentElement.style.display = 'none';
           }
         })
         .catch(() => {
           document.getElementById('analysis-loading').textContent = 'Analysis failed — try again later.';
-          document.getElementById('winrate-skeleton').textContent = 'Analysis unavailable';
+          document.getElementById('winrate-wrap').parentElement.style.display = 'none';
         });
     }
 
