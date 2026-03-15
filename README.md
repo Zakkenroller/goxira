@@ -1,152 +1,171 @@
-# Igo — AI Go Tutor
+# Goxira — AI Go Tutor
 
-An AI-powered Go tutor with level assessment, adaptive problems, live play, and game replay analysis.
+A free, open-source AI Go tutor with rank assessment, adaptive problems, live play, and game analysis. Powered by KataGo (engine) and Claude (teaching narrative).
 
----
-
-## Setup Guide (Step by Step)
-
-### Step 1 — Create a GitHub Repository
-
-1. Go to [github.com/new](https://github.com/new)
-2. Name it `igo-tutor` (or anything you like)
-3. Make it **Public**
-4. Click **Create repository**
-5. Upload all files from this folder, OR use Git:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_USERNAME/igo-tutor.git
-   git push -u origin main
-   ```
+**Live at**: [goxira.netlify.app](https://goxira.netlify.app)
 
 ---
 
-### Step 2 — Create a Supabase Project
+## Features
 
-1. Go to [supabase.com](https://supabase.com) → **New Project**
-2. Pick a name (e.g. `igo-tutor`) and set a strong database password
-3. Choose a region closest to you
-4. Wait ~2 minutes for the project to spin up
-5. Go to **SQL Editor** → **New Query**
-6. Paste the entire contents of `supabase-schema.sql` and click **Run**
-7. You should see "Success" for each statement
-
-**Get your credentials:**
-- Go to **Settings → API**
-- Copy the **Project URL** (looks like `https://xxxx.supabase.co`)
-- Copy the **anon public** key (long JWT string)
-
-**Enable Google OAuth (optional):**
-- Go to **Authentication → Providers → Google**
-- You'll need a Google Cloud Console OAuth 2.0 client ID
-- Set the redirect URL to: `https://YOUR_NETLIFY_SITE.netlify.app/home.html`
+- **Rank assessment** — conversational onboarding that places you from 30 kyu to dan level
+- **Adaptive tsumego** — ~4,000 canon problems served by difficulty, with AI-generated hints and explanations grounded in verified tactical facts
+- **Live play vs Goxira** — KataGo-strength opponent that scales to your rank; teaching pauses and live commentary
+- **Game review** — upload any SGF or replay a saved game; KataGo winrate chart with key moment annotations and Claude-generated summary
+- **Profile & rank history** — track your progress over time
 
 ---
 
-### Step 3 — Deploy to Netlify
+## Self-Hosting
 
-1. Go to [netlify.com](https://netlify.com) → **Add new site → Import from Git**
-2. Connect your GitHub account and select the `igo-tutor` repo
-3. Build settings will auto-detect from `netlify.toml`:
-   - **Publish directory:** `.`
-   - **Functions directory:** `netlify/functions`
-4. Click **Deploy site**
+Goxira runs on three services you can swap or replace:
 
-**Add environment variables in Netlify:**
-- Go to **Site settings → Environment variables → Add variable**
-- Add these three:
+| Layer | Default | Replaceable with |
+|---|---|---|
+| Frontend hosting | Netlify | Any static host |
+| Database + Auth | Supabase | Any Postgres + auth provider |
+| KataGo engine | Hetzner VPS | Any server running KataGo |
 
-| Key | Value |
-|-----|-------|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key (starts with `sk-ant-`) |
+### Step 1 — Supabase
+
+1. Create a new project at [supabase.com](https://supabase.com)
+2. In **SQL Editor → New Query**, run `supabase-schema.sql`
+3. Manually create the `tsumego_problems` table and load your problem data (see below)
+4. From **Settings → API**, copy your **Project URL** and **anon public key**
+5. *(Optional)* Enable Google OAuth under **Authentication → Providers → Google**; set redirect URL to `https://YOUR_SITE/home.html`
+
+### Step 2 — KataGo Service
+
+The KataGo wrapper runs on a separate VPS to keep the GPL license isolated.
+
+```bash
+# On your VPS (Ubuntu 22.04 recommended, 2GB RAM minimum)
+cd katago-service
+bash setup.sh        # installs KataGo binary + model
+npm start
+```
+
+Set a bearer token for the service (`KATAGO_TOKEN` env var) and note the VPS URL.
+
+See `katago-service/setup.sh` and `katago-service/analysis.cfg` for configuration.
+
+### Step 3 — Netlify
+
+1. Fork this repo and connect it to [netlify.com](https://netlify.com)
+2. Build settings auto-detect from `netlify.toml` (publish: `.`, functions: `functions/`)
+3. Add environment variables under **Site settings → Environment variables**:
+
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key (`sk-ant-...`) |
 | `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_SERVICE_KEY` | Your Supabase **service_role** key (from Settings → API) |
+| `SUPABASE_SERVICE_KEY` | Your Supabase `service_role` key |
+| `KATAGO_SERVICE_URL` | Your KataGo VPS URL (e.g. `https://katago.yourdomain.com`) |
+| `KATAGO_TOKEN` | Bearer token for the KataGo service |
 
-5. Go to **Deploys → Trigger deploy → Deploy site**
+### Step 4 — Frontend Config
 
----
-
-### Step 4 — Update Frontend Config
-
-In `auth.html`, `home.html`, `assess.html` (and any other HTML files), find this block:
+In each HTML page, update the config block with your Supabase credentials:
 
 ```javascript
 window.GOTUTOR_CONFIG = {
-  supabaseUrl:     'REPLACE_WITH_YOUR_SUPABASE_URL',
-  supabaseAnonKey: 'REPLACE_WITH_YOUR_SUPABASE_ANON_KEY',
+  supabaseUrl:     'https://YOUR_PROJECT.supabase.co',
+  supabaseAnonKey: 'YOUR_ANON_KEY',
 };
 ```
 
-Replace the placeholder values with your actual Supabase **Project URL** and **anon public** key.
+> Use the **anon key** here (browser-safe), not the service_role key.
 
-> ⚠️ Use the **anon key** here (safe for browsers), not the service_role key.
+### Step 5 — Test
+
+1. Visit your Netlify URL
+2. Sign up and complete the assessment
+3. Solve a problem — you should see KataGo-grounded feedback
+4. Play a game — Goxira should move immediately (KataGo) with live commentary
 
 ---
 
-### Step 5 — Test It
+## tsumego_problems Table
 
-1. Visit your Netlify URL (e.g. `https://igo-tutor.netlify.app`)
-2. Create an account with email/password
-3. You should be redirected to the assessment screen
-4. Go through the assessment
-5. Start solving problems!
+The problem library is not included in `supabase-schema.sql` because the ~4,000 problem records live in the database, not the repo. The table schema is:
+
+```sql
+create table public.tsumego_problems (
+  id          uuid primary key default uuid_generate_v4(),
+  source      text not null,          -- e.g. 'gokibitz', 'cho-elementary'
+  difficulty  integer not null,       -- 0 (easiest) to ~2900 (hardest)
+  board_size  integer not null,       -- 9, 13, or 19
+  to_play     text not null,          -- 'B' or 'W'
+  stones      jsonb not null,         -- {"col,row": "B"|"W", ...}
+  solution_col integer not null,
+  solution_row integer not null
+);
+
+-- Public read access (no auth needed to fetch problems)
+alter table public.tsumego_problems enable row level security;
+create policy "Problems: public read" on public.tsumego_problems
+  for select using (true);
+```
+
+To load your own problems, import a JSONL or CSV matching this schema into Supabase.
 
 ---
 
 ## File Structure
 
 ```
-igo-tutor/
-├── index.html          ← Landing page
-├── auth.html           ← Sign in / Sign up
-├── assess.html         ← Level assessment (TODO: build in Phase 2)
-├── home.html           ← Dashboard (TODO: build in Phase 2)
-├── problems.html       ← Problem solving (TODO: build in Phase 3)
-├── play.html           ← Live game vs Claude (TODO: build in Phase 3)
-├── review.html         ← Game replay & analysis (TODO: build in Phase 4)
-├── css/
-│   └── styles.css      ← All shared styles
-├── js/
-│   ├── board.js        ← SVG Go board renderer ✅
-│   ├── supabase-client.js ← Auth & DB helpers ✅
-│   └── api.js          ← Netlify function wrappers ✅
-├── netlify/
-│   └── functions/
-│       ├── _claude.js        ← Shared Claude API helper ✅
-│       ├── assess.js         ← Assessment conversation ✅
-│       ├── problem.js        ← Problem generation ✅
-│       ├── evaluate-move.js  ← Move evaluation ✅
-│       ├── analyze-move.js   ← Game replay analysis ✅
-│       ├── game-summary.js   ← End-of-game summary ✅
-│       └── claude-move.js    ← Claude's live game moves ✅
-├── supabase-schema.sql ← Run this once in Supabase SQL editor ✅
-└── netlify.toml        ← Netlify config ✅
+goxira/
+├── index.html              ← Landing page
+├── auth.html               ← Sign in / sign up
+├── assess.html             ← Conversational rank assessment
+├── home.html               ← Dashboard
+├── problems.html           ← Adaptive tsumego problems
+├── play.html               ← Live play vs Goxira
+├── review.html             ← Game replay + KataGo analysis
+├── profile.html            ← Rank history + account
+├── styles.css              ← Shared styles
+├── board.js                ← SVG Go board renderer (touch + mouse)
+├── supabase-client.js      ← Auth + DB helpers
+├── api.js                  ← Netlify function wrappers
+├── functions/
+│   ├── assess.js           ← Assessment conversation
+│   ├── problem.js          ← Problem fetch + AI enrichment
+│   ├── evaluate-move.js    ← Tsumego feedback (rules engine + KataGo)
+│   ├── analyze-move.js     ← Move commentary (coordinate only; no verdict)
+│   ├── game-hint.js        ← Live game commentary (KataGo-grounded)
+│   ├── game-summary.js     ← Post-game summary (KataGo winrate curve)
+│   ├── katago-move.js      ← Move generation via KataGo
+│   └── claude-move.js      ← Move generation fallback (Claude only)
+├── katago-service/
+│   ├── server.js           ← HTTP wrapper for KataGo binary
+│   ├── analysis.cfg        ← KataGo configuration
+│   ├── setup.sh            ← VPS install script
+│   └── package.json
+├── supabase-schema.sql     ← Run once in Supabase SQL editor
+└── netlify.toml            ← Netlify build config
 ```
-
-## Build Phases
-
-- ✅ **Phase 1** — Infrastructure (this drop): Board renderer, auth, all serverless functions, DB schema
-- 🔲 **Phase 2** — Assessment + Dashboard: assess.html, home.html with rank display
-- 🔲 **Phase 3** — Problems + Live Play: problems.html, play.html
-- 🔲 **Phase 4** — Game Replay Analysis: review.html (the signature feature)
-- 🔲 **Phase 5** — Polish: rank chart, streaks, problem library
 
 ---
 
 ## Troubleshooting
 
-**"Cannot find module" in Netlify functions:**
-Functions use Node.js `require()`. Make sure `_claude.js` is in the same `netlify/functions/` directory.
+**KataGo moves are slow or timing out**
+Check that the KataGo service VPS is running (`npm start` in `katago-service/`). The service has a 10-second timeout per request. Claude is the automatic fallback if KataGo is unavailable — the app will keep working, just without engine strength.
 
-**Supabase auth redirect not working:**
-In Supabase → Authentication → URL Configuration, add your Netlify URL to "Redirect URLs":
-`https://your-site.netlify.app/**`
+**"Permission denied" on problem fetch**
+The `tsumego_problems` table needs a public read RLS policy (see schema above). Without it, unauthenticated fetches in `problem.js` will fail.
 
-**Google OAuth not working:**
-Make sure the redirect URL in Google Cloud Console matches exactly what's in Supabase.
+**Supabase auth redirect not working**
+In Supabase → Authentication → URL Configuration, add your Netlify URL to Redirect URLs: `https://your-site.netlify.app/**`
 
-**Board doesn't render:**
-Make sure `board.js` loads before any script that calls `Board.create()`.
+**Google OAuth not working**
+The redirect URL in Google Cloud Console must match exactly what's in Supabase. Use `https://YOUR_PROJECT.supabase.co/auth/v1/callback`.
+
+**Board doesn't render**
+`board.js` must load before any script that calls `Board.create()`. Check script order in the HTML.
+
+---
+
+## License
+
+MIT. KataGo itself is GPL-3.0 — kept architecturally separate in `katago-service/` for this reason.
