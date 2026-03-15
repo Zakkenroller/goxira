@@ -497,6 +497,7 @@
           showCommentary(res.message, 'correct');
           await onSolved();
         } else {
+          board.clearJudging(); // remove the judging stone — move was wrong
           updatePip(thisAttempt, 'wrong');
           showCommentary(res.message, 'wrong');
 
@@ -509,6 +510,7 @@
         }
       } catch(e) {
         console.error('Evaluate error:', e);
+        board.clearJudging();
         showCommentary('Something went wrong. Try again.', '');
         board.setInteractive(true);
       }
