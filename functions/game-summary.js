@@ -4,19 +4,20 @@ const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
 // Fetch per-turn winrate from KataGo. Returns null if unavailable.
+// Hard timeout prevents KataGo from consuming the entire function budget.
 async function katagoAnalyze(sgf, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 10000));
   try {
-    const res = await fetch(`${KATAGO_SERVICE_URL}/analyze`, {
+    const fetchResult = fetch(`${KATAGO_SERVICE_URL}/analyze`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${KATAGO_TOKEN}`,
       },
       body: JSON.stringify({ sgf, boardSize }),
-    });
-    if (!res.ok) return null;
-    return await res.json(); // { turns: [{turnNumber, winrate, scoreLead, bestMove}] }
+    }).then(res => res.ok ? res.json() : null).catch(() => null);
+    return await Promise.race([fetchResult, timeout]);
   } catch (e) {
     console.error('KataGo analyze error:', e.message);
     return null;
@@ -106,6 +107,9 @@ ACCURACY RULES — follow strictly:
     });
 
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
+    }
     const text = data.content[0].text.replace(/```json|```/g, '').trim();
     const summary = JSON.parse(text);
     return { statusCode: 200, headers, body: JSON.stringify({ summary, turns: katagoResult?.turns ?? [] }) };
