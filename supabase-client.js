@@ -145,6 +145,15 @@ const UserDB = {
     });
     if (error) console.error('Log attempt error:', error);
   },
+
+  async getSolvedCount(userId) {
+    const { count } = await sb
+      .from('problem_attempts')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('solved', true);
+    return count || 0;
+  },
 };
 
 // ── Rank utilities ───────────────────────────────────────────────────────── //

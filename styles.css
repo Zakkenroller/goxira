@@ -218,7 +218,7 @@ a:hover { text-decoration: underline; }
 @media (max-width: 640px) {
   .nav__links { display: none; }
   .bottom-nav { display: flex; }
-  .page-main { padding: 1.25rem 1rem 5rem; }
+  .page-main { padding: 1.25rem 1rem calc(5rem + env(safe-area-inset-bottom, 0px)); }
   .card { padding: 1.1rem; }
 }
 @media (min-width: 641px) {

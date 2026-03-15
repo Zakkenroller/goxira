@@ -343,7 +343,7 @@
     let isMoving       = false;
     let userId         = null;
     let userProfile    = null;
-    let sessionSolved  = 0;
+    let totalSolved    = 0;
 
 
     // ── Init ────────────────────────────────────────────────────
@@ -356,6 +356,9 @@
 
       document.getElementById('stat-rank').textContent  = userProfile.current_rank;
       document.getElementById('stat-score').textContent = userProfile.rank_score;
+
+      totalSolved = await UserDB.getSolvedCount(userId);
+      document.getElementById('stat-solved').textContent = totalSolved;
 
       await loadNewProblem();
     }
@@ -373,7 +376,7 @@
       document.getElementById('board-loading').style.display = 'flex';
       document.getElementById('topic-badge').textContent = 'Loading…';
       document.getElementById('to-play').style.display = 'none';
-      document.getElementById('problem-description').textContent = 'Generating your problem…';
+      document.getElementById('problem-description').textContent = 'Loading problem…';
       resetPips();
 
       if (board) {
@@ -529,8 +532,8 @@
       document.getElementById('skip-btn').style.display = 'none';
       document.getElementById('next-btn').style.display = 'inline-flex';
 
-      sessionSolved++;
-      document.getElementById('stat-solved').textContent = sessionSolved;
+      totalSolved++;
+      document.getElementById('stat-solved').textContent = totalSolved;
 
       const points = Rank.pointsForProblem(true, hintsUsed, currentProblem.difficulty || 1);
       await updateRankScore(points);
