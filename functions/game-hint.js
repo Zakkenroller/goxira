@@ -1,5 +1,8 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
 
+const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
+const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
+
 function stonesToGoNotation(stones, size) {
   const COLS = 'ABCDEFGHJKLMNOPQRST';
   const black = [], white = [];
@@ -10,6 +13,30 @@ function stonesToGoNotation(stones, size) {
     else white.push(notation);
   });
   return `Black: ${black.join(', ')} | White: ${white.join(', ')}`;
+}
+
+// Call KataGo /move to get a position evaluation (winrate + scoreLead).
+// We use max strength here for accuracy, then only give winrate/score to Claude
+// (not the move itself, so Claude can't accidentally give it away).
+async function katagoEval(sgf, playerColor, boardSize) {
+  if (!KATAGO_SERVICE_URL || !sgf) return null;
+  try {
+    const res = await fetch(`${KATAGO_SERVICE_URL}/move`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${KATAGO_TOKEN}`,
+      },
+      // Use max visits for an accurate eval; rank doesn't matter for analysis
+      body: JSON.stringify({ sgf, color: playerColor, boardSize, rank: '1 dan' }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return { winrate: data.winrate, scoreLead: data.scoreLead };
+  } catch (e) {
+    console.error('KataGo hint eval error:', e.message);
+    return null;
+  }
 }
 
 exports.handler = async (event) => {
@@ -23,6 +50,18 @@ exports.handler = async (event) => {
   try {
     const { sgf, boardSize, rank, playerColor, currentStones, moveNumber } = JSON.parse(event.body);
 
+    const katago = await katagoEval(sgf, playerColor, boardSize);
+
+    let katagoContext = '';
+    if (katago?.winrate != null) {
+      const playerWr  = playerColor === 'B' ? katago.winrate : (1 - katago.winrate);
+      const winPct    = Math.round(playerWr * 100);
+      const scoreStr  = katago.scoreLead != null
+        ? ` Score lead: ${katago.scoreLead > 0 ? '+' : ''}${katago.scoreLead.toFixed(1)} pts for ${katago.scoreLead > 0 ? 'Black' : 'White'}.`
+        : '';
+      katagoContext = `\nKataGo: ${playerColor === 'B' ? 'Black' : 'White'} (student) is at ${winPct}% winrate.${scoreStr}`;
+    }
+
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -33,15 +72,16 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 300,
-        system: `You are a Go tutor commenting on a live game in progress. 
-Give the student helpful commentary about the current position — what's the key tension, what area needs attention, what concept applies here. 
+        system: `You are a Go tutor commenting on a live game in progress.
+Give the student helpful commentary about the current position — what's the key tension, what area needs attention, what concept applies here.
 Do NOT give the exact move. Be like a coach watching over their shoulder.
+If KataGo winrate data is provided, you may mention the rough game state (e.g. "you're slightly ahead") but don't give an exact percentage.
 Keep it under 80 words. Conversational, encouraging. No markdown.`,
         messages: [{
           role: 'user',
           content: `Student plays ${playerColor} at ${rank} level. Move ${moveNumber} on ${boardSize}x${boardSize} board.
 Current stones in Go notation: ${stonesToGoNotation(currentStones, boardSize)}
-SGF: ${sgf || '(early game)'}
+SGF: ${sgf || '(early game)'}${katagoContext}
 Give position commentary and strategic guidance.`
         }],
       }),
