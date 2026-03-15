@@ -33,6 +33,12 @@ const API = (() => {
     getHint(sgf, boardSize, rank, playerColor, currentStones, moveNumber) {
       return post('game-hint', { sgf, boardSize, rank, playerColor, currentStones, moveNumber });
     },
+    ogsSearch(username) {
+      return post('ogs-import', { action: 'search', username });
+    },
+    ogsGetSGF(gameId) {
+      return post('ogs-import', { action: 'sgf', gameId });
+    },
   };
 })();
 

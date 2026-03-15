@@ -118,6 +118,49 @@
     .moment-badge--critical { background: rgba(139,58,30,0.12);  color: var(--accent); }
     .moment-explanation { font-size: 0.8rem; color: var(--ink-light); line-height: 1.5; margin-top: 2px; }
 
+    /* ── OGS import ── */
+    .ogs-section { margin-bottom: 1.25rem; }
+    .ogs-toggle {
+      width: 100%; text-align: left; background: white;
+      border: 1px solid var(--paper-deep); border-radius: var(--r-md);
+      padding: 0.75rem 1rem; cursor: pointer; font-size: 0.875rem;
+      color: var(--ink-light); display: flex; align-items: center; gap: 0.5rem;
+      transition: background 0.15s;
+    }
+    .ogs-toggle:hover { background: var(--paper-warm); }
+    .ogs-panel { padding: 0.75rem 0 0; }
+    .ogs-input-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .ogs-input-row input {
+      flex: 1; padding: 0.5rem 0.75rem; font-size: 0.875rem;
+      border: 1px solid var(--paper-deep); border-radius: var(--r-md);
+      font-family: var(--font-sans); color: var(--ink);
+      background: white; outline: none;
+    }
+    .ogs-input-row input:focus { border-color: var(--accent); }
+    .ogs-game-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.65rem 0.85rem; margin-bottom: 0.4rem;
+      background: white; border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md); font-size: 0.82rem;
+    }
+    .ogs-game-item__info { color: var(--ink); line-height: 1.4; }
+    .ogs-game-item__meta { font-size: 0.75rem; color: var(--ink-faint); }
+
+    /* ── Share button ── */
+    .share-btn {
+      padding: 0.35rem 0.75rem; font-size: 0.8rem;
+      margin-left: auto;
+    }
+
+    /* ── Public banner ── */
+    .public-banner {
+      background: var(--paper-warm); border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md); padding: 0.6rem 1rem;
+      font-size: 0.82rem; color: var(--ink-faint);
+      margin-bottom: 0.75rem; text-align: center;
+    }
+    .public-banner a { color: var(--accent); }
+
     /* ── Mobile ── */
     @media (max-width: 640px) {
       .page-main  { padding-top: 0.5rem; }
@@ -150,6 +193,22 @@
 
       <!-- ── Game list view ── -->
       <div id="list-view">
+
+        <!-- OGS import -->
+        <div class="ogs-section">
+          <button class="ogs-toggle" onclick="toggleOGSImport()">
+            <span>⬇</span> Import from OGS
+          </button>
+          <div id="ogs-panel" class="ogs-panel" style="display:none">
+            <div class="ogs-input-row">
+              <input type="text" id="ogs-username" placeholder="OGS username" autocomplete="off"
+                     onkeydown="if(event.key==='Enter') fetchOGSGames()">
+              <button class="btn btn--primary" onclick="fetchOGSGames()" id="ogs-search-btn">Find</button>
+            </div>
+            <div id="ogs-results"></div>
+          </div>
+        </div>
+
         <p class="section-title">Recent Games</p>
         <div id="games-list">
           <div class="analysis-loading">
@@ -161,9 +220,13 @@
       <!-- ── Review view (hidden until a game is loaded) ── -->
       <div id="review-view" style="display:none">
 
-        <!-- Back button -->
-        <div style="margin-bottom:0.75rem">
+        <!-- Back button + share -->
+        <div style="margin-bottom:0.75rem;display:flex;align-items:center;gap:0.5rem;">
           <button class="btn btn--secondary" onclick="showList()" style="padding:0.35rem 0.75rem;font-size:0.8rem;">← All games</button>
+          <button class="btn btn--secondary share-btn" id="share-btn" onclick="shareGame()" style="display:none">Share ↗</button>
+        </div>
+        <div id="public-banner" style="display:none" class="public-banner">
+          Viewing a shared game — <a href="auth.html">sign up free</a> to analyse your own games.
         </div>
 
         <!-- Board -->
@@ -238,19 +301,23 @@
     let keyMoments  = [];      // from game-summary
     let winrateTurns = [];     // from KataGo
     let playerColor = 'B';     // colour the logged-in user played
+    let currentGameId   = null;
+    let currentGameOwner = null;
 
     // ── Init ──────────────────────────────────────────────────────
     async function init() {
+      // Attempt auth — non-blocking so public games still load
       const session = await Auth.getSession();
-      if (!session) { location.href = 'auth.html'; return; }
-      userId      = session.user.id;
-      userProfile = await UserDB.getProfile(userId);
-      if (!userProfile) { location.href = 'auth.html'; return; }
+      if (session) {
+        userId      = session.user.id;
+        userProfile = await UserDB.getProfile(userId);
+      }
 
       const id = new URLSearchParams(location.search).get('id');
       if (id) {
         await loadGame(id);
       } else {
+        if (!userId) { location.href = 'auth.html'; return; }
         await loadGameList();
       }
     }
@@ -282,8 +349,11 @@
     }
 
     function showList() {
-      document.getElementById('review-view').style.display = 'none';
-      document.getElementById('list-view').style.display   = 'block';
+      document.getElementById('review-view').style.display  = 'none';
+      document.getElementById('list-view').style.display    = 'block';
+      document.getElementById('share-btn').style.display    = 'none';
+      document.getElementById('public-banner').style.display = 'none';
+      currentGameId = null; currentGameOwner = null;
       history.pushState({}, '', 'review.html');
     }
 
@@ -292,17 +362,41 @@
       document.getElementById('list-view').style.display   = 'none';
       document.getElementById('review-view').style.display = 'block';
 
-      // Find game in Supabase
-      const games = await UserDB.getGames(userId, 50);
-      const game  = games.find(g => g.id === id);
+      let game = null;
+
+      // 1. Try user's own games first
+      if (userId) {
+        const games = await UserDB.getGames(userId, 50);
+        game = games.find(g => g.id === id) || null;
+      }
+
+      // 2. Fall back to public read (works without auth if public = true)
       if (!game) {
+        const { data } = await sb.from('saved_games').select('*').eq('id', id).eq('public', true).maybeSingle();
+        game = data;
+        if (game) {
+          document.getElementById('public-banner').style.display = 'block';
+        }
+      }
+
+      if (!game) {
+        if (!userId) { location.href = 'auth.html'; return; }
         document.getElementById('analysis-section').innerHTML =
           '<div class="analysis-loading">Game not found.</div>';
         return;
       }
 
-      boardSize   = game.board_size;
-      playerColor = 'B'; // default; we don't store player colour yet
+      currentGameId    = game.id;
+      currentGameOwner = game.user_id;
+      boardSize        = game.board_size;
+      playerColor      = 'B'; // default; player colour not stored yet
+
+      // Show share button only to the game owner
+      if (userId && userId === currentGameOwner) {
+        const btn = document.getElementById('share-btn');
+        btn.style.display  = '';
+        btn.textContent    = game.public ? 'Shared ✓' : 'Share ↗';
+      }
 
       // 1. Parse SGF
       moves = parseSGF(game.sgf_content);
@@ -316,7 +410,8 @@
       goToMove(0);
 
       // 4. Request game summary + KataGo analysis in background
-      API.gameSummary(game.sgf_content, boardSize, userProfile.current_rank, playerColor)
+      const rank = userProfile?.current_rank || '20 kyu';
+      API.gameSummary(game.sgf_content, boardSize, rank, playerColor)
         .then(data => {
           renderAnalysis(data.summary);
           if (data.turns?.length) {
@@ -330,6 +425,83 @@
           document.getElementById('analysis-loading').textContent = 'Analysis failed — try again later.';
           document.getElementById('winrate-wrap').parentElement.style.display = 'none';
         });
+    }
+
+    // ── Share game ────────────────────────────────────────────────
+    async function shareGame() {
+      if (!currentGameId || !userId) return;
+      const btn = document.getElementById('share-btn');
+      btn.disabled = true;
+      try {
+        await UserDB.setGamePublic(currentGameId, true);
+        const url = `${location.origin}/review.html?id=${currentGameId}`;
+        await navigator.clipboard.writeText(url).catch(() => prompt('Copy this link:', url));
+        btn.textContent = 'Shared ✓';
+        UI.toast('Link copied to clipboard', 'success');
+      } catch(e) {
+        UI.toast('Could not share — try again', 'error');
+        btn.disabled = false;
+      }
+    }
+
+    // ── OGS import ────────────────────────────────────────────────
+    function toggleOGSImport() {
+      const panel = document.getElementById('ogs-panel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function fetchOGSGames() {
+      const username = document.getElementById('ogs-username').value.trim();
+      if (!username) return;
+      const btn     = document.getElementById('ogs-search-btn');
+      const results = document.getElementById('ogs-results');
+      btn.disabled  = true;
+      btn.textContent = '…';
+      results.innerHTML = '';
+      try {
+        const data = await API.ogsSearch(username);
+        if (!data.games.length) {
+          results.innerHTML = '<p style="font-size:0.82rem;color:var(--ink-faint)">No completed games found.</p>';
+          return;
+        }
+        results.innerHTML = data.games.map(g => {
+          const date = g.ended ? new Date(g.ended).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+          return `
+            <div class="ogs-game-item">
+              <div class="ogs-game-item__info">
+                ${escHtml(g.blackPlayer)} vs ${escHtml(g.whitePlayer)}
+                <div class="ogs-game-item__meta">${g.boardSize}×${g.boardSize} · ${date}</div>
+              </div>
+              <button class="btn btn--secondary" style="font-size:0.78rem;padding:0.3rem 0.65rem"
+                      onclick="importOGSGame(${g.id}, ${g.boardSize}, this)">Import</button>
+            </div>`;
+        }).join('');
+      } catch(e) {
+        results.innerHTML = `<p style="font-size:0.82rem;color:var(--ink-faint)">${escHtml(e.message)}</p>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Find';
+      }
+    }
+
+    async function importOGSGame(gameId, boardSz, btn) {
+      if (!userId) { location.href = 'auth.html'; return; }
+      btn.disabled    = true;
+      btn.textContent = '…';
+      try {
+        const { sgf }  = await API.ogsGetSGF(gameId);
+        const saved    = await UserDB.saveGame(userId, sgf, boardSz, 'ogs_import');
+        btn.textContent = 'Imported ✓';
+        // Reload game list so it shows immediately
+        await loadGameList();
+        // Jump straight into review
+        history.pushState({}, '', `review.html?id=${saved.id}`);
+        await loadGame(saved.id);
+      } catch(e) {
+        btn.textContent = 'Failed';
+        btn.disabled    = false;
+        UI.toast('Import failed — ' + e.message, 'error');
+      }
     }
 
     // ── SGF parsing ───────────────────────────────────────────────

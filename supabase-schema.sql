@@ -34,7 +34,8 @@ create table public.saved_games (
   user_id     uuid not null references public.users(id) on delete cascade,
   sgf_content text not null,
   board_size  integer not null check (board_size in (9, 13, 19)),
-  source      text not null check (source in ('live_play', 'sgf_upload')),
+  source      text not null check (source in ('live_play', 'sgf_upload', 'ogs_import')),
+  public      boolean not null default false,
   created_at  timestamptz not null default now()
 );
 
@@ -70,6 +71,8 @@ create policy "Attempts: all own" on public.problem_attempts
 -- Saved games
 create policy "Games: all own" on public.saved_games
   for all using (auth.uid() = user_id);
+create policy "Games: public read" on public.saved_games
+  for select using (public = true);
 
 -- Rank history
 create policy "Rank: all own" on public.rank_history
