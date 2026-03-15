@@ -123,6 +123,13 @@ const UserDB = {
     return data;
   },
 
+  async setGamePublic(gameId, isPublic) {
+    const { error } = await sb.from('saved_games')
+      .update({ public: isPublic })
+      .eq('id', gameId);
+    if (error) throw error;
+  },
+
   async getGames(userId, limit = 10) {
     const { data, error } = await sb
       .from('saved_games')
