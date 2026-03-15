@@ -30,6 +30,9 @@ const API = (() => {
     getClaudeMove(sgf, color, boardSize, rank, currentStones) {
       return post('claude-move', { sgf, color, boardSize, rank, currentStones });
     },
+    getHint(sgf, boardSize, rank, playerColor, currentStones, moveNumber) {
+      return post('game-hint', { sgf, boardSize, rank, playerColor, currentStones, moveNumber });
+    },
   };
 })();
 

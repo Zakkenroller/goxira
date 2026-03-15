@@ -3,7 +3,7 @@
  * Used by all Netlify functions. Never imported by the browser.
  */
 
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
 async function callClaude(systemPrompt, messages, maxTokens = 1000) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {

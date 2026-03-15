@@ -359,7 +359,7 @@
     </div>
   </nav>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
   <script>
     window.GOTUTOR_CONFIG = {
       supabaseUrl:     'https://humvrkmlvhzwoawoyslu.supabase.co',
@@ -868,15 +868,11 @@
       btn.disabled    = true;
       btn.textContent = 'Goxira is thinking…';
       try {
-        const res = await fetch('/.netlify/functions/game-hint', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sgf: buildSGF(), boardSize,
-            rank: userProfile?.current_rank || '20 kyu',
-            playerColor, currentStones: board.getStones(), moveNumber,
-          }),
-        }).then(r => r.json());
+        const res = await API.getHint(
+          buildSGF(), boardSize,
+          userProfile?.current_rank || '20 kyu',
+          playerColor, board.getStones(), moveNumber,
+        );
         setCommentary('💬 ' + res.commentary);
       } catch(e) {
         setCommentary('Could not get commentary right now.');
