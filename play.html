@@ -548,6 +548,68 @@
       endGame('resign');
     }
 
+    // ── Area scoring (Chinese rules) ────────────────────────────
+    function areaScore() {
+      const stones = board.getStones();
+      const komi = boardSize === 19 ? 7.5 : boardSize === 13 ? 6.5 : 5.5;
+      let blackStones = 0, whiteStones = 0;
+
+      // Count stones on the board
+      for (const key in stones) {
+        if (stones[key] === 'B') blackStones++;
+        else if (stones[key] === 'W') whiteStones++;
+      }
+
+      // Flood-fill to find territories
+      const visited = new Set();
+      let blackTerritory = 0, whiteTerritory = 0;
+
+      for (let r = 0; r < boardSize; r++) {
+        for (let c = 0; c < boardSize; c++) {
+          const key = `${c},${r}`;
+          if (visited.has(key) || stones[key]) continue;
+
+          // BFS to find connected empty region and its bordering colors
+          const region = [];
+          const queue = [[c, r]];
+          const borders = new Set();
+          visited.add(key);
+
+          while (queue.length) {
+            const [qc, qr] = queue.shift();
+            region.push([qc, qr]);
+            for (const [nc, nr] of [[qc-1,qr],[qc+1,qr],[qc,qr-1],[qc,qr+1]]) {
+              if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
+              const nk = `${nc},${nr}`;
+              if (stones[nk]) { borders.add(stones[nk]); continue; }
+              if (visited.has(nk)) continue;
+              visited.add(nk);
+              queue.push([nc, nr]);
+            }
+          }
+
+          // Territory belongs to a color only if bordered by exactly one color
+          if (borders.size === 1) {
+            if (borders.has('B')) blackTerritory += region.length;
+            else whiteTerritory += region.length;
+          }
+        }
+      }
+
+      const blackTotal = blackStones + blackTerritory;
+      const whiteTotal = whiteStones + whiteTerritory + komi;
+      return { blackTotal, whiteTotal, komi };
+    }
+
+    function scoreMessage(score) {
+      const diff = Math.abs(score.blackTotal - score.whiteTotal);
+      const winner = score.blackTotal > score.whiteTotal ? 'Black' : 'White';
+      const playerWins = (playerColor === 'B' && winner === 'Black')
+                      || (playerColor === 'W' && winner === 'White');
+      const who = playerWins ? 'You win' : 'Goxira wins';
+      return `${who} — ${winner} by ${diff.toFixed(1)} points (area scoring, ${score.komi} komi).`;
+    }
+
     // ── End game ─────────────────────────────────────────────────
     async function endGame(reason) {
       gameOver = true;
@@ -564,8 +626,9 @@
       document.getElementById('game-over-msg').textContent   = msg;
       document.getElementById('game-over-card').classList.add('show');
 
-      // Fetch KataGo score estimate for completed games (not resigns)
+      // Score completed games (not resigns)
       if (reason !== 'resign') {
+        // Try KataGo first; fall back to client-side area scoring
         fetch('/.netlify/functions/katago-move', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -579,12 +642,10 @@
             document.getElementById('game-over-msg').textContent =
               `${who} by ~${pts} points (KataGo estimate). Review to see how it played out.`;
           } else {
-            document.getElementById('game-over-msg').textContent =
-              'Both players passed. Time to count the score!';
+            document.getElementById('game-over-msg').textContent = scoreMessage(areaScore());
           }
         }).catch(() => {
-          document.getElementById('game-over-msg').textContent =
-            'Both players passed. Time to count the score!';
+          document.getElementById('game-over-msg').textContent = scoreMessage(areaScore());
         });
       }
 
