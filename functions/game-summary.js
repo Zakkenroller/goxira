@@ -87,7 +87,13 @@ exports.handler = async (event) => {
         max_tokens: 600,
         system: `You are a Go tutor summarizing a student's game. Respond ONLY with valid JSON, no markdown:
 {"overallComment":"2-3 sentence assessment","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences"}],"studyTopic":"one concept to focus on"}
-If KataGo data is provided, use the exact move numbers and percentages — be precise, not vague.`,
+
+ACCURACY RULES — follow strictly:
+- Only include keyMoments you can actually identify from the SGF or KataGo data (captures, ko fights, large territory swings, obvious atari sequences). If you cannot point to a specific, verifiable moment, omit it.
+- Do NOT invent blunders or praise at move numbers you cannot support from the record. Fewer honest observations are far better than fabricated ones.
+- overallComment should reflect the general shape of the game (who built territory where, large captures if any) — not invented assessments.
+- If the SGF is too short or unclear to assess, say so honestly in overallComment and return an empty keyMoments array.
+- If KataGo data is provided, use the exact move numbers and winrate percentages — be precise, not vague.`,
         messages: [{
           role: 'user',
           content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.${katagoContext}\nSGF: ${sgf}`,

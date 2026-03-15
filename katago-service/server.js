@@ -328,6 +328,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+
   return respond(res, 404, { error: 'not found' });
 });
 
