@@ -32,10 +32,20 @@ class KataGoEngine {
       '-config', KATAGO_CONFIG,
     ]);
 
+    // Watchdog: if KataGo doesn't report ready within 120s, it's stuck —
+    // kill it and let the exit handler trigger a fresh restart.
+    this._startupWatchdog = setTimeout(() => {
+      if (!this.ready) {
+        console.error('KataGo startup watchdog: not ready after 120s — killing to force restart');
+        if (this.proc) this.proc.kill('SIGKILL');
+      }
+    }, 120000);
+
     this.proc.stderr.on('data', (data) => {
       const msg = data.toString();
       if (!this.ready && msg.includes('Started')) {
         this.ready = true;
+        clearTimeout(this._startupWatchdog);
         console.log('KataGo ready');
       }
       if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('warning')) {
@@ -68,6 +78,7 @@ class KataGoEngine {
     this.proc.on('exit', (code) => {
       console.error(`KataGo exited (code ${code}), restarting in 3s...`);
       this.ready = false;
+      clearTimeout(this._startupWatchdog);
       // Reject all pending queries
       for (const [, entry] of this.pending) {
         clearTimeout(entry.timer);
