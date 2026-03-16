@@ -15,3 +15,6 @@
 
 [functions."game-summary"]
   timeout = 26
+
+[functions."analyze-move"]
+  timeout = 26
