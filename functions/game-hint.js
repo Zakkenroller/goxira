@@ -25,17 +25,17 @@ function moveToArea(gtp, boardSize) {
 // Uses full strength for accurate eval.
 async function katagoEval(sgf, playerColor, boardSize) {
   if (!KATAGO_SERVICE_URL || !sgf) return null;
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
   try {
-    const res = await fetch(`${KATAGO_SERVICE_URL}/move`, {
+    const fetchResult = fetch(`${KATAGO_SERVICE_URL}/move`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${KATAGO_TOKEN}`,
       },
       body: JSON.stringify({ sgf, color: playerColor, boardSize, rank: '1 dan' }),
-    });
-    if (!res.ok) return null;
-    return await res.json();
+    }).then(res => res.ok ? res.json() : null).catch(() => null);
+    return await Promise.race([fetchResult, timeout]);
   } catch (e) {
     console.error('KataGo hint eval error:', e.message);
     return null;
