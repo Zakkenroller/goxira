@@ -1,15 +1,21 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
-function stonesToGoNotation(stones, size) {
+// Build an ASCII board grid so Claude can see the spatial layout
+function buildAsciiBoard(stones, size) {
   const COLS = 'ABCDEFGHJKLMNOPQRST';
-  const black = [], white = [];
-  Object.entries(stones || {}).forEach(([key, color]) => {
-    const [c, r] = key.split(',').map(Number);
-    const notation = COLS[c] + (size - r);
-    if (color === 'B') black.push(notation);
-    else white.push(notation);
-  });
-  return `Black: ${black.join(', ') || 'none'} | White: ${white.join(', ') || 'none'}`;
+  const lines = [];
+  lines.push('   ' + Array.from({ length: size }, (_, i) => COLS[i]).join(' '));
+  for (let r = 0; r < size; r++) {
+    const rowNum = size - r;
+    const rowStr = String(rowNum).padStart(2);
+    const cells = [];
+    for (let c = 0; c < size; c++) {
+      const stone = stones?.[`${c},${r}`];
+      cells.push(stone === 'B' ? 'X' : stone === 'W' ? 'O' : '.');
+    }
+    lines.push(`${rowStr} ${cells.join(' ')}`);
+  }
+  return lines.join('\n');
 }
 
 function goNotationToCoords(notation, size) {
@@ -31,23 +37,26 @@ exports.handler = async (event) => {
     const { sgf, color, boardSize, rank, currentStones } = JSON.parse(event.body);
     const COLS = 'ABCDEFGHJKLMNOPQRST';
 
-    // Build list of occupied points in Go notation
-    const occupied = new Set();
-    Object.keys(currentStones || {}).forEach(key => {
-      const [c, r] = key.split(',').map(Number);
-      occupied.add(COLS[c] + (boardSize - r));
-    });
-
-    // Build list of all empty points
+    // Build full list of empty points in Go notation
     const empty = [];
     for (let c = 0; c < boardSize; c++) {
       for (let r = 0; r < boardSize; r++) {
-        const key = `${c},${r}`;
-        if (!currentStones || !currentStones[key]) {
+        if (!currentStones?.[`${c},${r}`]) {
           empty.push(COLS[c] + (boardSize - r));
         }
       }
     }
+
+    // Shuffle to avoid systematic bias if we ever need to truncate
+    for (let i = empty.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [empty[i], empty[j]] = [empty[j], empty[i]];
+    }
+
+    const emptySet = new Set(empty);
+    const boardAscii = buildAsciiBoard(currentStones, boardSize);
+    const playerSymbol = color === 'B' ? 'X' : 'O';
+    const opponentSymbol = color === 'B' ? 'O' : 'X';
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -59,15 +68,15 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 200,
-        system: `You are playing Go. You MUST choose from the empty points list provided. Output ONLY a JSON object, no explanation, no markdown fences.
+        system: `You are playing Go as ${playerSymbol} (${color === 'B' ? 'Black' : 'White'}) on a ${boardSize}x${boardSize} board.
+Board key: X=Black, O=White, .=empty intersection.
+You MUST pick one of the listed empty points. Never pick an occupied point.
+Output ONLY a JSON object — no explanation, no markdown fences.
 Format: {"move": "E5", "thinking": "one short sentence"}
-To pass use: {"move": "pass", "thinking": "reason"}`,
+To pass: {"move": "pass", "thinking": "reason"}`,
         messages: [{
           role: 'user',
-          content: `You play ${color} at ${rank} level on ${boardSize}x${boardSize}.
-Current position: ${stonesToGoNotation(currentStones, boardSize)}
-Available empty points (choose ONE of these): ${empty.slice(0, 40).join(', ')}
-Pick your move.`
+          content: `You play ${playerSymbol} at ${rank} level. ${opponentSymbol} is your opponent.\n\nCurrent board:\n${boardAscii}\n\nAvailable empty points (choose ONE): ${empty.join(', ')}\n\nPick your move.`,
         }],
       }),
     });
@@ -77,23 +86,31 @@ Pick your move.`
       console.error('Anthropic API error:', JSON.stringify(data));
       return { statusCode: 502, headers, body: JSON.stringify({ error: data.error?.message || 'Anthropic API error' }) };
     }
-    const text = data.content[0].text.replace(/```[a-z]*\n?/g, '').trim();
+
+    const text = data.content[0].text.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(text);
 
     if (parsed.move === 'pass') {
       return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: parsed.thinking } }) };
     }
 
-    // Convert Go notation back to coordinates
-    const coords = goNotationToCoords(parsed.move, boardSize);
+    const moveNotation = parsed.move.toUpperCase();
 
-    // Final safety check
+    // Validate the chosen point is actually empty
+    if (!emptySet.has(moveNotation)) {
+      console.warn('claude-move: model chose non-empty or invalid point', parsed.move);
+      return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: "I'll pass." } }) };
+    }
+
+    const coords = goNotationToCoords(moveNotation, boardSize);
+
+    // Bounds safety check
     if (coords.col < 0 || coords.col >= boardSize || coords.row < 0 || coords.row >= boardSize) {
-      return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: 'I\'ll pass.' } }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: "I'll pass." } }) };
     }
 
     return { statusCode: 200, headers, body: JSON.stringify({ move: { col: coords.col, row: coords.row, thinking: parsed.thinking } }) };
-  } catch(e) {
+  } catch (e) {
     console.error('claude-move error:', e);
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
   }

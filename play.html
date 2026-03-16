@@ -478,6 +478,16 @@
       return false;
     }
 
+    // Pick a random legal move for the given color (used as last-resort fallback)
+    function getRandomLegalMove(color, stones) {
+      const legal = [];
+      for (let c = 0; c < boardSize; c++)
+        for (let r = 0; r < boardSize; r++)
+          if (isLegalMove(c, r, color, stones)) legal.push({ col: c, row: r });
+      if (!legal.length) return null;
+      return legal[Math.floor(Math.random() * legal.length)];
+    }
+
     function isBoardEffectivelyOver() {
       const stones = board.getStones();
       const filled = Object.keys(stones).length;
@@ -540,12 +550,22 @@
         }
 
         if (!res?.move) {
-          // Both services unavailable — pass this turn rather than crashing
+          // Both services unavailable — play a random legal move to keep the game going
           document.getElementById('claude-thinking').classList.remove('show');
-          consecutivePasses++;
-          addSGFPass(claudeColor);
-          setCommentary('Goxira is unable to move right now — passing this turn.');
-          if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
+          const fallback = getRandomLegalMove(claudeColor, board.getStones());
+          if (fallback) {
+            consecutivePasses = 0;
+            board.place(fallback.col, fallback.row, claudeColor);
+            moveNumber++;
+            addSGFMove(claudeColor, fallback.col, fallback.row);
+            updateMoveCount();
+            setCommentary('Goxira plays.');
+          } else {
+            consecutivePasses++;
+            addSGFPass(claudeColor);
+            setCommentary('Goxira passes — no legal moves available.');
+            if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
+          }
           updateTurnIndicator(playerColor);
           board.setColor(playerColor);
           board.setInteractive(true);
@@ -570,11 +590,21 @@
         } else {
           const stones = board.getStones();
           if (!isLegalMove(move.col, move.row, claudeColor, stones)) {
-            // Illegal — force pass
-            consecutivePasses++;
-            addSGFPass(claudeColor);
-            setCommentary('Goxira passes.');
-            if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
+            // Illegal move returned — play a random legal move instead of forcing a pass
+            const fallback = getRandomLegalMove(claudeColor, stones);
+            if (fallback) {
+              consecutivePasses = 0;
+              board.place(fallback.col, fallback.row, claudeColor);
+              moveNumber++;
+              addSGFMove(claudeColor, fallback.col, fallback.row);
+              updateMoveCount();
+              setCommentary('Goxira plays.');
+            } else {
+              consecutivePasses++;
+              addSGFPass(claudeColor);
+              setCommentary('Goxira passes.');
+              if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
+            }
           } else {
             consecutivePasses = 0;
             board.place(move.col, move.row, claudeColor);

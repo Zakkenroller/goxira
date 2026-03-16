@@ -20,14 +20,23 @@ exports.handler = async (event) => {
   try {
     const { sgf, color, boardSize, rank } = JSON.parse(event.body);
 
-    const res = await fetch(`${KATAGO_SERVICE_URL}/move`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${KATAGO_TOKEN}`,
-      },
-      body: JSON.stringify({ sgf, color, boardSize, rank }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    let res;
+    try {
+      res = await fetch(`${KATAGO_SERVICE_URL}/move`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${KATAGO_TOKEN}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({ sgf, color, boardSize, rank }),
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!res.ok) {
       const err = await res.text();
