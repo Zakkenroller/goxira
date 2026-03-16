@@ -23,24 +23,49 @@ exports.handler = async (event) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 22000);
 
-    let res;
+    // Retry once after a short delay if the service responds with an error.
+    // This handles the window after a SIGKILL restart where KataGo is still
+    // loading but the HTTP server is already accepting connections.
+    let res = null;
+    const MAX_ATTEMPTS = 2;
+    const RETRY_DELAY_MS = 4000;
+
     try {
-      res = await fetch(`${KATAGO_SERVICE_URL}/move`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${KATAGO_TOKEN}`,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({ sgf, color, boardSize, rank }),
-      });
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          // Brief wait to give KataGo time to finish starting up.
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          if (controller.signal.aborted) break;
+        }
+
+        let r;
+        try {
+          r = await fetch(`${KATAGO_SERVICE_URL}/move`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${KATAGO_TOKEN}`,
+            },
+            signal: controller.signal,
+            body: JSON.stringify({ sgf, color, boardSize, rank }),
+          });
+        } catch (fetchErr) {
+          // AbortError (timeout) or network error — no point retrying.
+          throw fetchErr;
+        }
+
+        if (r.ok) { res = r; break; }
+
+        const errText = await r.text().catch(() => '');
+        console.error(`katago-service /move error (attempt ${attempt + 1}/${MAX_ATTEMPTS}):`, r.status, errText);
+        // Only retry on 5xx (service errors); 4xx errors won't recover on retry.
+        if (r.status < 500) break;
+      }
     } finally {
       clearTimeout(timeoutId);
     }
 
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('katago-service /move error:', res.status, err);
+    if (!res) {
       return { statusCode: 502, headers, body: JSON.stringify({ error: 'katago-service error' }) };
     }
 
