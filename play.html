@@ -536,7 +536,21 @@
         if (!res?.move) {
           res = await fetch('/.netlify/functions/claude-move', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: movePayload,
-          }).then(r => r.json());
+          }).then(r => r.ok ? r.json() : null).catch(() => null);
+        }
+
+        if (!res?.move) {
+          // Both services unavailable — pass this turn rather than crashing
+          document.getElementById('claude-thinking').classList.remove('show');
+          consecutivePasses++;
+          addSGFPass(claudeColor);
+          setCommentary('Goxira is unable to move right now — passing this turn.');
+          if (consecutivePasses >= 2 || isBoardEffectivelyOver()) { endGame('double-pass'); return; }
+          updateTurnIndicator(playerColor);
+          board.setColor(playerColor);
+          board.setInteractive(true);
+          if (snapshot) enableUndo(snapshot);
+          return;
         }
 
         const move = res.move;
