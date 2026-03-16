@@ -19,8 +19,8 @@ Goxira is intended to be **permanently free** and eventually hyperscale. Every a
 **Database**: Supabase (PostgreSQL). Row-level security enforced — users can only read/write their own data.
 
 **AI Stack**:
-- **KataGo** (via `katago-service/` on a separate VPS) — primary engine for move generation, position evaluation, and per-turn game analysis. Deployed and live.
-- **Claude** (`claude-sonnet-4-6`) — narrative layer. Generates problem descriptions, game summaries, assessment conversations, and teaching commentary. Always grounded in verified facts or KataGo data; never speculates on position quality without engine support.
+- **KataGo** (via `katago-service/` on a separate VPS) — the only Go engine. Produces moves, win rates, score leads, top-5 candidate moves with principal variations, and ownership maps. Deployed and live.
+- **Claude** (`claude-sonnet-4-6`) — teaching interpreter only. Translates KataGo's numerical output into natural-language explanations calibrated to the student's rank. Claude does not play Go, evaluate positions, or generate tactical sequences. Every Claude prompt that touches position quality must receive KataGo data as input.
 
 **Problem Library**: ~4,000 canon tsumego in the `tsumego_problems` Supabase table. Problems are selected by rank-mapped difficulty with random sampling. Claude enriches each problem with a description, first-attempt hint, and explanation at serve time — it does not generate the positions themselves.
 
@@ -30,21 +30,45 @@ Goxira is a teaching tool. Inaccurate advice is worse than no advice — a stude
 
 **Do not say what you do not know.** Every feedback message, hint, or commentary must be grounded in what the system can actually verify. When the data isn't there to support a claim, say less and say it honestly. Confabulated Go advice actively harms students.
 
+## The Two-System Rule
+
+Goxira has exactly two AI systems with **non-overlapping roles**:
+
+| System | Role | What it produces |
+|---|---|---|
+| KataGo | Go engine | Moves, win rates, score leads, top-5 candidate moves with principal variations |
+| Claude | Teaching interpreter | Natural-language explanations of KataGo's output, calibrated to student rank |
+
+**Claude cannot play Go.** It cannot evaluate positions. It cannot generate tactical sequences. It cannot estimate win rates. Any code path where the Anthropic API produces move coordinates, positional judgments, or strategic assessments without KataGo data as input is architecturally wrong.
+
+**KataGo cannot teach.** Its output is raw numerical data. Claude explains why a move is good — but only when grounded in KataGo's data.
+
 ### What KataGo enables (use it)
-KataGo is integrated and should be the ground truth for all position evaluation:
-- `evaluate-move.js` — has full board state + KataGo win probability. Can give grounded move feedback.
-- `game-hint.js` — has live position + KataGo winrate/scoreLead. Can reference concrete game state.
-- `game-summary.js` — has per-turn KataGo winrate curve. Can identify real winrate drops as key moments.
-- `katago-move.js` — uses KataGo for move generation; Claude is the fallback only.
+KataGo now returns top-5 candidate moves with principal variations from all relevant endpoints:
+- `evaluate-move.js` — receives KataGo top-5 at the problem position. Claude explains alternatives grounded in this data.
+- `game-hint.js` — receives KataGo top-5 and translates to directional coaching (area, not exact coordinates).
+- `game-summary.js` — receives per-turn winrate curve + top-5 alternatives at each key moment.
+- `katago-move.js` — KataGo generates all opponent moves. Returns `{ move, analysis: { topMoves, rootWinrate, rootScoreLead } }`.
+- `analyze-move.js` — receives full SGF + KataGo top-5 at that position. Claude explains the move in context.
 
-### Remaining hard limits
-One function still has structural constraints that must be respected:
+### Hard rules — never violate these
 
-- **`analyze-move.js` only receives the move coordinate**, not the full board state. It must not claim the move was good or bad. It can speak to strategic themes typically associated with that type of move (approach, invasion, extension, etc.) and be honest that position-specific evaluation requires engine data. This is by design — do not loosen this without also passing board state.
-
-### Always true
-- **No invented key moments.** If KataGo data isn't available for a game summary, flag fewer moments rather than fabricating them.
+- **Never add a Claude-as-engine fallback.** If KataGo is down, degrade gracefully with an honest message. Never call Claude to generate moves, evaluate positions, or produce tactical sequences.
+- **Never have Claude generate move coordinates.** Claude's output must be natural language. Any GTP coordinates in a Claude response must have originated from KataGo data passed into the prompt.
+- **Never silently degrade.** If KataGo is down, tell the user. A silent fallback corrupts the student's learning.
+- **Never let Claude claim confidence it doesn't have.** If KataGo data is missing, Claude must disclaim it.
+- **No invented key moments.** If KataGo data isn't available for a game summary, return an empty `keyMoments` array — never fabricate moments.
 - **Encouragement is not a license to fudge.** Being warm and supportive is good; inventing praise about a position is not.
+
+### KataGo degradation (what to do when the engine is down)
+
+| Feature | KataGo unavailable behavior |
+|---|---|
+| Opponent move (play.html) | Stop game cleanly. Save SGF. Show user a message. Do not substitute. |
+| Tsumego feedback (evaluate-move) | Claude uses only deterministic tactical facts (captures/atari). Explicit disclaimer added. |
+| Live hint (game-hint) | Return honest "engine offline" message + generic universal principles only. |
+| Game summary (game-summary) | Return `{ overallComment: "Engine unavailable...", keyMoments: [], studyTopic: null }`. |
+| Move commentary (analyze-move) | Generic thematic observation only, with explicit disclaimer. |
 
 ## Feature Status
 
@@ -54,7 +78,7 @@ All major features are implemented and deployed:
 |---|---|
 | Conversational rank assessment | ✅ Live |
 | Adaptive tsumego problems (~4,000 canon) | ✅ Live |
-| Live play vs KataGo/Claude | ✅ Live |
+| Live play vs KataGo | ✅ Live |
 | Teaching pause on pass | ✅ Live |
 | Game review with winrate chart | ✅ Live |
 | KataGo engine integration | ✅ Live (separate VPS) |

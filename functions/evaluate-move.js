@@ -8,17 +8,6 @@ function toGoNotation(col, row, boardSize) {
   return GOCOLS[col] + (boardSize - row);
 }
 
-function stonesToGoNotation(stones, boardSize) {
-  const black = [], white = [];
-  Object.entries(stones || {}).forEach(([key, color]) => {
-    const [c, r] = key.split(',').map(Number);
-    const n = toGoNotation(c, r, boardSize);
-    if (color === 'B') black.push(n);
-    else white.push(n);
-  });
-  return `Black: ${black.join(', ') || 'none'} | White: ${white.join(', ') || 'none'}`;
-}
-
 // Convert {col,row: color} stones to KataGo initialStones format [["B","D5"],...]
 function stonesToKataGo(stones, boardSize) {
   return Object.entries(stones || {}).map(([key, color]) => {
@@ -121,8 +110,8 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
   return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
 }
 
-// ── KataGo: objective position evaluation ────────────────────────────────
-// Returns { winrate, scoreLead, bestMove } or null if KataGo unavailable.
+// ── KataGo: top-5 position evaluation ────────────────────────────────────
+// Returns { winrate, scoreLead, bestMove, topMoves } or null if KataGo unavailable.
 async function katagoEval(initialStones, playerMove, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
   try {
@@ -140,6 +129,18 @@ async function katagoEval(initialStones, playerMove, boardSize) {
     console.error('KataGo eval error:', e.message);
     return null;
   }
+}
+
+function formatTopMoves(topMoves, studentMove, toPlayWord) {
+  if (!topMoves?.length) return '';
+  const lines = topMoves.map((m, i) => {
+    const winPct = Math.round((m.winrate ?? 0) * 100);
+    const score = m.scoreLead != null ? `, score ${m.scoreLead > 0 ? '+' : ''}${m.scoreLead.toFixed(1)}` : '';
+    const pv = m.pv?.length ? ` (sequence: ${m.pv.join(', ')})` : '';
+    const marker = m.move === studentMove ? ' ← student\'s move' : '';
+    return `  ${i + 1}. ${m.move}: ${winPct}% for ${toPlayWord}${score}${pv}${marker}`;
+  });
+  return `KataGo top-5 candidate moves:\n${lines.join('\n')}`;
 }
 
 exports.handler = async (event) => {
@@ -175,20 +176,36 @@ exports.handler = async (event) => {
     const studentFactsStr = tacticalFactsString(studentFacts, studentMove, toPlayWord, opponentWord);
     const correctFactsStr = tacticalFactsString(correctFacts, correctMove, toPlayWord, opponentWord);
 
-    // ── KataGo: win probability and score (async, non-blocking) ──
+    // ── KataGo: top 5 candidate moves with principal variations ──
     const katagoStones = stonesToKataGo(setupStones, boardSize);
     const katago       = await katagoEval(katagoStones, [toPlay, studentMove], boardSize);
 
     let katagoContext = '';
+    let systemPreamble = '';
+
     if (katago) {
       const winPct   = Math.round((katago.winrate ?? 0.5) * 100);
       const scoreStr = katago.scoreLead != null
         ? `, score lead ${katago.scoreLead > 0 ? '+' : ''}${katago.scoreLead.toFixed(1)} pts`
         : '';
-      const bestStr  = (katago.bestMove && katago.bestMove !== studentMove)
-        ? ` KataGo's preferred move: ${katago.bestMove}.`
-        : '';
-      katagoContext = `\nKataGo evaluation after student's move: ${winPct}% for ${toPlayWord}${scoreStr}.${bestStr}`;
+      const topMovesStr = formatTopMoves(katago.topMoves, studentMove, toPlayWord);
+      const bestMove = katago.topMoves?.[0]?.move;
+      const studentRank = katago.topMoves?.findIndex(m => m.move === studentMove) ?? -1;
+      const rankStr = studentRank >= 0 ? ` Student's move ranks #${studentRank + 1} of KataGo's top 5.` : '';
+
+      katagoContext = `\nKataGo evaluation after student's move: ${winPct}% for ${toPlayWord}${scoreStr}.${rankStr}\n${topMovesStr}`;
+
+      systemPreamble = `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
+GROUNDING RULES:
+- Reference ONLY moves and evaluations present in the KataGo data provided below.
+- Do NOT invent variations, sequences, or moves not in KataGo's top-5 list.
+- Do NOT estimate or fabricate win rates. Use KataGo's numbers exactly.
+- The "Verified tactical facts" section is computed by a deterministic rules engine (captures, atari, liberties). These are ground truth. Use them.
+- If the data doesn't cover something, say so honestly. Saying less is always better than fabricating.`;
+    } else {
+      systemPreamble = `You are a Go tutor evaluating a student's tsumego attempt. Be concise (under 80 words) and honest. No markdown.
+KataGo engine data is not available for this position. You may ONLY reference the verified tactical facts below (captures, atari). Do NOT estimate whether this move is strategically good or bad. Do NOT invent win rates or suggest alternative moves. You can describe what the move physically does on the board and nothing more.
+The "Verified tactical facts" section is computed by a deterministic rules engine and is ground truth.`;
     }
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -200,16 +217,15 @@ exports.handler = async (event) => {
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 150,
-        system: `You are a Go tutor evaluating a student's tsumego attempt. Be concise (under 80 words) and honest. No markdown.
+        max_tokens: 200,
+        system: `${systemPreamble}
 
-ACCURACY CONTRACT — READ THIS FIRST:
-Verified board facts are computed by a deterministic rules engine and provided below. These are ground truth.
-- Use the verified facts to make specific tactical statements (captures, atari, liberties).
-- Do NOT make any tactical claim not present in the verified facts. No inventing captures, atari, or variations.
-- If KataGo evaluation is provided, use its numbers verbatim. Do not contradict them.
+TEACHING CALIBRATION:
+- 25k–15k: Simple language. Focus on what happened tactically (captures, escapes). One concept at a time.
+- 15k–5k: Introduce strategic reasoning. Explain why a move is directionally wrong. Reference shapes and patterns by name.
+- 5k–1d+: Full strategic discussion. Discuss aji, thickness, direction of play. Reference joseki and fuseki concepts where relevant.
 
-RESPONSE STYLE:
+RESPONSE STYLE (be concise, under 80 words):
 Attempt 1 wrong → Socratic hint toward the key tactical concept. Do not reveal the answer coordinate.
 Attempt 2 wrong → More direct hint using the verified facts about the correct move.
 Attempt 3+ wrong → State the correct answer and explain it using only the verified facts.

@@ -45,6 +45,8 @@ exports.handler = async (event) => {
     }
 
     const data = await res.json();
+    // Pass through the full response including top 5 analysis from KataGo.
+    // Downstream callers receive: { move, winrate, scoreLead, analysis: { topMoves, rootWinrate, rootScoreLead } }
     return { statusCode: 200, headers, body: JSON.stringify(data) };
 
   } catch (e) {

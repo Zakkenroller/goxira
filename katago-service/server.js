@@ -227,9 +227,16 @@ const server = http.createServer(async (req, res) => {
         maxVisits: rankToMaxVisits(rank),
       });
 
-      const best = result.moveInfos?.[0];
+      const topMoves = (result.moveInfos || []).slice(0, 5).map(m => ({
+        move: m.move,
+        visits: m.visits,
+        winrate: m.winrate,
+        scoreLead: m.scoreLead,
+        pv: (m.pv || []).slice(0, 5),
+      }));
+      const best = topMoves[0];
       if (!best) {
-        return respond(res, 200, { move: { col: -1, row: -1, thinking: "I'll pass." } });
+        return respond(res, 200, { move: { col: -1, row: -1, thinking: "I'll pass." }, analysis: null });
       }
 
       const coords    = gtpToCoords(best.move, boardSize);
@@ -241,6 +248,11 @@ const server = http.createServer(async (req, res) => {
         move: { ...coords, thinking: `Winrate ${winPct}%` },
         winrate,
         scoreLead,
+        analysis: {
+          topMoves,
+          rootWinrate: winrate,
+          rootScoreLead: scoreLead,
+        },
       });
 
     } catch (e) {
@@ -289,6 +301,13 @@ const server = http.createServer(async (req, res) => {
         winrate: r.rootInfo?.winrate ?? null,
         scoreLead: r.rootInfo?.scoreLead ?? null,
         bestMove: r.moveInfos?.[0]?.move ?? null,
+        topMoves: (r.moveInfos || []).slice(0, 5).map(m => ({
+          move: m.move,
+          visits: m.visits,
+          winrate: m.winrate,
+          scoreLead: m.scoreLead,
+          pv: (m.pv || []).slice(0, 5),
+        })),
       }));
 
       return respond(res, 200, { turns });
@@ -321,11 +340,19 @@ const server = http.createServer(async (req, res) => {
         maxVisits:     100,
       });
 
-      const best = result.moveInfos?.[0];
+      const topMoves = (result.moveInfos || []).slice(0, 5).map(m => ({
+        move: m.move,
+        visits: m.visits,
+        winrate: m.winrate,
+        scoreLead: m.scoreLead,
+        pv: (m.pv || []).slice(0, 5),
+      }));
+      const best = topMoves[0];
       return respond(res, 200, {
         winrate:   result.rootInfo?.winrate   ?? null,
         scoreLead: result.rootInfo?.scoreLead ?? null,
         bestMove:  best?.move ?? null,
+        topMoves,
       });
     } catch (e) {
       console.error('/analyze-position error:', e.message);

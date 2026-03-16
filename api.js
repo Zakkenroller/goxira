@@ -21,14 +21,11 @@ const API = (() => {
     evaluateMove(problem, col, row, attemptNumber, rank) {
       return post('evaluate-move', { problem, col, row, attemptNumber, rank });
     },
-    analyzeMove(sgf, moveNumber, boardSize, rank, move, playerColor) {
-      return post('analyze-move', { sgf, moveNumber, boardSize, rank, move, playerColor });
+    analyzeMove(sgf, moveNumber, boardSize, rank, move, playerColor, currentStones) {
+      return post('analyze-move', { sgf, moveNumber, boardSize, rank, move, playerColor, currentStones });
     },
     gameSummary(sgf, boardSize, rank, playerColor) {
       return post('game-summary', { sgf, boardSize, rank, playerColor });
-    },
-    getClaudeMove(sgf, color, boardSize, rank, currentStones) {
-      return post('claude-move', { sgf, color, boardSize, rank, currentStones });
     },
     getHint(sgf, boardSize, rank, playerColor, currentStones, moveNumber) {
       return post('game-hint', { sgf, boardSize, rank, playerColor, currentStones, moveNumber });
