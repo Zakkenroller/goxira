@@ -87,6 +87,11 @@ class KataGoEngine {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error('KataGo query timeout'));
+          // Kill the process — the exit handler will clear remaining pending
+          // queries and restart KataGo. Without this, a hung KataGo process
+          // causes every subsequent query to also hang until manual restart.
+          console.error(`KataGo query ${id} timed out — killing process to force restart`);
+          if (this.proc) this.proc.kill('SIGKILL');
         }
       }, timeoutMs);
 
