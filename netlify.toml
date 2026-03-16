@@ -10,5 +10,8 @@
 [functions]
   node_bundler = "esbuild"
 
+[functions."katago-move"]
+  timeout = 26
+
 [functions."game-summary"]
   timeout = 26
