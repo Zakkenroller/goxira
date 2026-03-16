@@ -89,7 +89,7 @@ function truncateSGF(sgf, moveCount) {
   }
   // Return everything up to and including the Nth move, inside the outer parens.
   const header = sgf.slice(0, sgf.indexOf(';') + 1).replace(/;[BW].*/, '');
-  const body = sgf.slice(sgf.indexOf(';'), lastIndex + 1);
+  const body = sgf.slice(sgf.indexOf(';'), lastIndex);
   return '(' + body + ')';
 }
 
