@@ -59,7 +59,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 200,
-        system: `You are playing Go. You MUST choose from the empty points list provided. Output ONLY raw JSON, no explanation, no markdown.
+        system: `You are playing Go. You MUST choose from the empty points list provided. Output ONLY a JSON object, no explanation, no markdown fences.
 Format: {"move": "E5", "thinking": "one short sentence"}
 To pass use: {"move": "pass", "thinking": "reason"}`,
         messages: [{
@@ -68,9 +68,6 @@ To pass use: {"move": "pass", "thinking": "reason"}`,
 Current position: ${stonesToGoNotation(currentStones, boardSize)}
 Available empty points (choose ONE of these): ${empty.slice(0, 40).join(', ')}
 Pick your move.`
-        }, {
-          role: 'assistant',
-          content: '{'
         }],
       }),
     });
@@ -80,8 +77,8 @@ Pick your move.`
       console.error('Anthropic API error:', JSON.stringify(data));
       return { statusCode: 502, headers, body: JSON.stringify({ error: data.error?.message || 'Anthropic API error' }) };
     }
-    const raw  = '{' + data.content[0].text;
-    const parsed = JSON.parse(raw);
+    const text = data.content[0].text.replace(/```[a-z]*\n?/g, '').trim();
+    const parsed = JSON.parse(text);
 
     if (parsed.move === 'pass') {
       return { statusCode: 200, headers, body: JSON.stringify({ move: { col: -1, row: -1, thinking: parsed.thinking } }) };
