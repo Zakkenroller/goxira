@@ -76,6 +76,10 @@ Pick your move.`
     });
 
     const data = await res.json();
+    if (!data.content) {
+      console.error('Anthropic API error:', JSON.stringify(data));
+      return { statusCode: 502, headers, body: JSON.stringify({ error: data.error?.message || 'Anthropic API error' }) };
+    }
     const raw  = '{' + data.content[0].text;
     const parsed = JSON.parse(raw);
 
