@@ -21,7 +21,7 @@ exports.handler = async (event) => {
     const { sgf, color, boardSize, rank } = JSON.parse(event.body);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 22000);
 
     let res;
     try {
