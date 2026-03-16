@@ -1,6 +1,6 @@
 # Goxira — AI Go Tutor
 
-A free, open-source AI Go tutor with rank assessment, adaptive problems, live play, and game analysis. Powered by KataGo (engine) and Claude (teaching narrative).
+A Go tutor with rank assessment, adaptive problems, live play, and game analysis. Powered by KataGo (engine) and Claude (teaching narrative).
 
 **Live at**: [goxira.netlify.app](https://goxira.netlify.app)
 
