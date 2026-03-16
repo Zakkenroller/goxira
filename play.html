@@ -503,6 +503,12 @@
 
       const snapshot = { stones: board.getStones(), sgfLength: sgfMoves.length, moveNumber };
 
+      // Capture pre-move SGF and GTP coordinate so analyze-move can compare
+      // the player's choice against KataGo's top-5 at this position.
+      const preMovesgf  = buildSGF();
+      const playerMoveGtp = colRowToGTP(col, row);
+      const thisMoveNumber = moveNumber;
+
       board.place(col, row, playerColor);
       moveNumber++;
       addSGFMove(playerColor, col, row);
@@ -513,6 +519,18 @@
       document.getElementById('undo-btn').disabled = true;
 
       await claudeMove(snapshot);
+
+      // After KataGo has responded, fetch teaching commentary on the player's move.
+      // Fire-and-forget: does not block gameplay. Updates commentary if game is still live.
+      if (!gameOver) {
+        API.analyzeMove(
+          preMovesgf, thisMoveNumber, boardSize,
+          userProfile?.current_rank || '20 kyu',
+          playerMoveGtp, playerColor,
+        ).then(data => {
+          if (!gameOver && data?.message) setCommentary(data.message);
+        }).catch(() => {}); // silent fail — commentary is non-critical
+      }
     }
 
     // ── Goxira move ──────────────────────────────────────────────
@@ -863,7 +881,9 @@
 
     // ── SGF ───────────────────────────────────────────────────────
     const SGFCOLS = 'abcdefghijklmnopqrs';
+    const GOCOLS  = 'ABCDEFGHJKLMNOPQRST'; // GTP column letters (skips I)
     function addSGFMove(color, col, row) { sgfMoves.push(`;${color}[${SGFCOLS[col]}${SGFCOLS[row]}]`); }
+    function colRowToGTP(col, row) { return GOCOLS[col] + (boardSize - row); }
     function addSGFPass(color)           { sgfMoves.push(`;${color}[]`); }
     function buildSGF()                  { return `(;GM[1]FF[4]SZ[${boardSize}]${sgfMoves.join('')})`; }
 
