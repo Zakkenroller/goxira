@@ -295,7 +295,8 @@
     let userProfile = null;
     let board       = null;
     let moves       = [];      // [{color, col, row, pass}]
-    let states      = [];      // states[i] = board.getStones() after move i (0 = empty)
+    let states      = [];      // states[i] = board.getStones() after move i (0 = initial)
+    let handicap    = [];      // AB[] stones from the current game's SGF header
     let boardSize   = 19;
     let currentMoveIndex = 0;
     let keyMoments  = [];      // from game-summary
@@ -534,6 +535,16 @@
     function parseSGF(sgf) {
       const SGFCOLS = 'abcdefghijklmnopqrs';
       boardSize = parseInt(sgf.match(/SZ\[(\d+)\]/)?.[1] || '19');
+
+      // Extract AB[] handicap setup stones from the SGF header.
+      handicap = [];
+      const abProp = sgf.match(/\bAB((?:\[[a-z]{2}\])+)/);
+      if (abProp) {
+        for (const c of abProp[1].matchAll(/\[([a-z]{2})\]/g)) {
+          handicap.push({ col: SGFCOLS.indexOf(c[1][0]), row: SGFCOLS.indexOf(c[1][1]) });
+        }
+      }
+
       const result = [];
       const re = /;([BW])\[([a-z]{0,2})\]/g;
       let m;
@@ -562,7 +573,8 @@
       document.body.appendChild(tmp);
 
       const tmpBoard = Board.create(tmp, boardSize, null);
-      states = [tmpBoard.getStones()]; // state 0 = empty
+      for (const { col, row } of handicap) tmpBoard.place(col, row, 'B');
+      states = [tmpBoard.getStones()]; // state 0 = initial position (handicap stones if any)
 
       for (const move of moves) {
         if (!move.pass) tmpBoard.place(move.col, move.row, move.color);
