@@ -294,7 +294,7 @@
 
         <div class="claude-thinking" id="claude-thinking">
           <span class="loader" style="width:14px;height:14px;border-width:2px;color:var(--ink-faint)"></span>
-          Goxira is thinking…
+          <span id="thinking-label">KataGo calculating…</span>
         </div>
 
         <div class="move-commentary" id="move-commentary">
@@ -629,7 +629,7 @@
             moveNumber++;
             addSGFMove(claudeColor, move.col, move.row);
             updateMoveCount();
-            setCommentary('Goxira played.');
+            setCommentary('Goxira played. Claude is analysing…');
             // Fetch teaching commentary asynchronously — don't block the game.
             // Pass res.analysis (already fetched above) so analyze-move skips its own KataGo call.
             const gen = ++commentaryGen;

@@ -151,6 +151,8 @@ const Board = (() => {
         const key = `${pos.col},${pos.row}`;
         if (hoverPos !== key) { hoverPos = key; drawHover(pos, true); }
       } else {
+        // Finger dragged off canvas — cancel any pending placement too
+        if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; pendingPos = null; }
         clearHover();
       }
     }, { passive: false });
