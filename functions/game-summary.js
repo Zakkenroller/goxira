@@ -1,4 +1,5 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const { keywordToCategory } = require('./_errorCategories');
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
@@ -208,6 +209,23 @@ If none of these match, use the closest one.`,
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
     const summary = JSON.parse(match[0]);
+
+    // Tag each key moment with an error category and produce a flat errorTags array
+    // for efficient pattern aggregation across games.
+    const errorTags = [];
+    if (Array.isArray(summary.keyMoments)) {
+      for (const moment of summary.keyMoments) {
+        const category = keywordToCategory(summary.studyKeyword);
+        if (category) {
+          moment.category = category;
+          if (moment.type === 'mistake' || moment.type === 'critical') {
+            errorTags.push(category);
+          }
+        }
+      }
+    }
+    summary.errorTags = errorTags;
+
     return { statusCode: 200, headers, body: JSON.stringify({ summary, turns: katagoResult.turns }) };
   } catch(e) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };

@@ -184,6 +184,7 @@
       <a href="problems.html" class="nav__link">Problems</a>
       <a href="play.html"     class="nav__link">Play</a>
       <a href="review.html"   class="nav__link active">Review</a>
+      <a href="progress.html" class="nav__link">Progress</a>
       <a href="profile.html"  class="nav__link">Profile</a>
     </div>
   </nav>
@@ -434,6 +435,11 @@
             renderWinrateChart();
           } else {
             if (winrateWrap) winrateWrap.parentElement.style.display = 'none';
+          }
+          // Persist ai_summary so pattern analysis can aggregate it later.
+          // Only save when engine was available (errorTags present) and the user owns the game.
+          if (!engineDown && data.summary?.errorTags && userId && userId === currentGameOwner) {
+            UserDB.saveAiSummary(game.id, data.summary);
           }
         })
         .catch(() => {

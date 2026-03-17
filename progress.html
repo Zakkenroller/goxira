@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Progress — Goxira</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-main { padding-top: 1.5rem; padding-bottom: 4rem; }
+
+    /* ── Page header ── */
+    .page-header { margin-bottom: 1.75rem; animation: fadeUp 0.4s ease both; }
+    .page-header h1 { font-size: 1.4rem; color: var(--ink); }
+    .page-header p  { font-size: 0.875rem; color: var(--ink-faint); margin-top: 0.25rem; }
+
+    /* ── Gate card (not enough games) ── */
+    .gate-card {
+      background: white; border: 1px solid var(--paper-deep);
+      border-radius: var(--r-lg); padding: 1.75rem 1.25rem;
+      text-align: center; animation: fadeUp 0.4s ease 0.05s both;
+    }
+    .gate-card__icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .gate-card__title { font-family: var(--font-serif); font-size: 1.1rem; color: var(--ink); margin-bottom: 0.4rem; }
+    .gate-card__sub   { font-size: 0.875rem; color: var(--ink-faint); margin-bottom: 1.25rem; line-height: 1.5; }
+    .progress-bar-wrap {
+      background: var(--paper-deep); border-radius: 99px;
+      height: 8px; overflow: hidden; margin-bottom: 0.5rem;
+    }
+    .progress-bar-fill {
+      height: 100%; background: var(--accent);
+      border-radius: 99px; transition: width 0.4s ease;
+    }
+    .progress-bar-label { font-size: 0.75rem; color: var(--ink-faint); }
+
+    /* ── Backfill section ── */
+    .backfill-card {
+      background: var(--paper-warm); border: 1px solid var(--paper-deep);
+      border-radius: var(--r-lg); padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem; animation: fadeUp 0.4s ease 0.08s both;
+    }
+    .backfill-card__title { font-size: 0.875rem; font-weight: 500; color: var(--ink); margin-bottom: 0.3rem; }
+    .backfill-card__sub   { font-size: 0.8rem; color: var(--ink-faint); margin-bottom: 0.75rem; line-height: 1.4; }
+    .backfill-progress { font-size: 0.8rem; color: var(--ink-faint); margin-top: 0.5rem; min-height: 1.2em; }
+
+    /* ── Analysis sections ── */
+    .section-label {
+      font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+      color: var(--ink-faint); font-weight: 600; margin-bottom: 0.75rem;
+    }
+
+    /* ── Weak area cards ── */
+    .weak-areas { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.75rem; }
+    .weak-card {
+      background: white; border: 1px solid var(--paper-deep);
+      border-radius: var(--r-lg); padding: 1rem 1.1rem;
+      animation: fadeUp 0.4s ease both;
+    }
+    .weak-card__header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    .weak-card__label { font-size: 0.9rem; font-weight: 500; color: var(--ink); }
+    .weak-card__count {
+      font-size: 0.75rem; color: var(--accent);
+      background: rgba(139,58,30,0.08); border-radius: 99px;
+      padding: 0.15rem 0.5rem; font-weight: 500;
+    }
+    .weak-card__bar-wrap {
+      background: var(--paper-deep); border-radius: 99px;
+      height: 5px; overflow: hidden; margin-bottom: 0.5rem;
+    }
+    .weak-card__bar-fill {
+      height: 100%; background: var(--accent);
+      border-radius: 99px;
+    }
+    .weak-card__explanation { font-size: 0.82rem; color: var(--ink-light); line-height: 1.5; }
+    .weak-card__link {
+      display: inline-block; margin-top: 0.4rem;
+      font-size: 0.78rem; color: var(--accent);
+      text-decoration: underline; text-underline-offset: 2px;
+    }
+
+    /* ── Study priorities ── */
+    .priorities-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.75rem; }
+    .priority-item {
+      display: flex; gap: 0.875rem; align-items: flex-start;
+      background: white; border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md); padding: 0.75rem 0.9rem;
+      animation: fadeUp 0.4s ease both;
+    }
+    .priority-num {
+      flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+      background: var(--ink); color: var(--paper);
+      font-size: 0.75rem; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+      margin-top: 0.05rem;
+    }
+    .priority-item__topic { font-size: 0.875rem; font-weight: 500; color: var(--ink); }
+    .priority-item__reason { font-size: 0.8rem; color: var(--ink-faint); margin-top: 0.15rem; line-height: 1.4; }
+    .priority-item__link { font-size: 0.78rem; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+    /* ── Progress notes ── */
+    .notes-card {
+      background: var(--paper-warm); border: 1px solid var(--paper-deep);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--r-md); padding: 0.875rem 1rem;
+      font-family: var(--font-serif); font-size: 0.9rem; line-height: 1.6;
+      color: var(--ink-light); margin-bottom: 1.75rem;
+      animation: fadeUp 0.4s ease both;
+    }
+
+    /* ── Locked categories ── */
+    .locked-section { margin-bottom: 1.75rem; }
+    .locked-grid { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .locked-chip {
+      background: white; border: 1px dashed var(--paper-deep);
+      border-radius: 99px; padding: 0.25rem 0.7rem;
+      font-size: 0.75rem; color: var(--ink-faint);
+      display: flex; align-items: center; gap: 0.3rem;
+    }
+    .locked-chip__lock { font-size: 0.7rem; opacity: 0.5; }
+
+    /* ── Meta footer ── */
+    .analysis-meta {
+      font-size: 0.75rem; color: var(--ink-faint); text-align: center;
+      margin-bottom: 0.5rem;
+    }
+
+    /* ── Loading / error states ── */
+    .loading-state {
+      text-align: center; padding: 3rem 1rem;
+      color: var(--ink-faint); font-size: 0.875rem;
+      display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+    }
+    .error-state {
+      background: white; border: 1px solid var(--paper-deep);
+      border-radius: var(--r-lg); padding: 1.5rem;
+      text-align: center; color: var(--ink-faint); font-size: 0.875rem;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Bottom nav ── */
+    .bottom-nav { display: flex; }
+  </style>
+</head>
+<body>
+
+  <!-- Top nav -->
+  <nav class="nav">
+    <a href="home.html" class="nav__logo">
+      <span class="nav__logo-stone"></span>
+      Goxira
+    </a>
+    <div class="nav__links">
+      <a href="problems.html" class="nav__link">Problems</a>
+      <a href="play.html" class="nav__link">Play</a>
+      <a href="review.html" class="nav__link">Review</a>
+      <a href="progress.html" class="nav__link nav__link--active">Progress</a>
+      <a href="profile.html" class="nav__link">Profile</a>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="page-main">
+    <div class="container container--narrow">
+
+      <div class="page-header">
+        <h1>Your Learning Progress</h1>
+        <p id="page-sub">Loading…</p>
+      </div>
+
+      <!-- Loading state -->
+      <div id="loading-state" class="loading-state">
+        <span class="loader"></span>
+        <span>Loading your games…</span>
+      </div>
+
+      <!-- Gate: not enough analyzed games -->
+      <div id="gate-section" style="display:none">
+        <div class="gate-card">
+          <div class="gate-card__icon">📊</div>
+          <p class="gate-card__title">Not enough data yet</p>
+          <p class="gate-card__sub" id="gate-sub">Play at least 5 games to unlock pattern analysis.</p>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" id="gate-bar" style="width:0%"></div>
+          </div>
+          <p class="progress-bar-label" id="gate-bar-label"></p>
+        </div>
+
+        <div style="margin-top:1.25rem">
+          <div id="backfill-card" class="backfill-card" style="display:none">
+            <p class="backfill-card__title">Analyze your existing games</p>
+            <p class="backfill-card__sub">You have saved games that haven't been analyzed yet. Run analysis to get pattern data from your history.</p>
+            <button class="btn btn--secondary" id="backfill-btn" onclick="startBackfill()">Analyze existing games</button>
+            <p class="backfill-progress" id="backfill-progress"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backfill available even when analyzed count >= 5 -->
+      <div id="backfill-card-inline" class="backfill-card" style="display:none">
+        <p class="backfill-card__title">Unanalyzed games available</p>
+        <p class="backfill-card__sub">Some saved games haven't been analyzed yet. Analyze them to improve pattern accuracy.</p>
+        <button class="btn btn--secondary" id="backfill-btn-inline" onclick="startBackfill()">Analyze remaining games</button>
+        <p class="backfill-progress" id="backfill-progress-inline"></p>
+      </div>
+
+      <!-- Main analysis content -->
+      <div id="analysis-section" style="display:none">
+
+        <!-- Progress notes -->
+        <div id="notes-card" class="notes-card" style="display:none"></div>
+
+        <!-- Weak areas -->
+        <div id="weak-areas-section" style="display:none">
+          <p class="section-label">Recurring Weak Areas</p>
+          <div class="weak-areas" id="weak-areas-list"></div>
+        </div>
+
+        <!-- Study priorities -->
+        <div id="priorities-section" style="display:none">
+          <p class="section-label">Study Priorities</p>
+          <div class="priorities-list" id="priorities-list"></div>
+        </div>
+
+        <!-- Meta -->
+        <p class="analysis-meta" id="analysis-meta"></p>
+
+        <button class="btn btn--secondary" style="width:100%;margin-bottom:0.75rem" onclick="runAnalysis()">Refresh analysis</button>
+
+        <!-- Locked categories -->
+        <div class="locked-section" id="locked-section" style="display:none">
+          <p class="section-label">Categories unlocking as you improve</p>
+          <div class="locked-grid" id="locked-grid"></div>
+        </div>
+
+      </div>
+
+      <!-- Error state -->
+      <div id="error-state" class="error-state" style="display:none">
+        <p id="error-msg">Analysis failed.</p>
+        <button class="btn btn--secondary" style="margin-top:0.75rem" onclick="runAnalysis()">Try again</button>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Bottom nav -->
+  <nav class="bottom-nav">
+    <div class="bottom-nav__item" onclick="location.href='home.html'">
+      <span class="bottom-nav__icon">⊞</span>Home
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='problems.html'">
+      <span class="bottom-nav__icon">🧩</span>Problems
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='play.html'">
+      <span class="bottom-nav__icon">⚫</span>Play
+    </div>
+    <div class="bottom-nav__item active" onclick="location.href='progress.html'">
+      <span class="bottom-nav__icon">📊</span>Progress
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='profile.html'">
+      <span class="bottom-nav__icon">◯</span>Profile
+    </div>
+  </nav>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+  <script>
+    window.GOTUTOR_CONFIG = {
+      supabaseUrl:     'https://humvrkmlvhzwoawoyslu.supabase.co',
+      supabaseAnonKey: 'sb_publishable_dEQVVToEQh35MPrBEtKkmQ_om0ty8-r',
+    };
+  </script>
+  <script src="supabase-client.js"></script>
+  <script src="api.js"></script>
+  <script>
+    const SENSEI_BASE = 'https://senseis.xmp.net/?';
+    const MIN_GAMES   = 5;
+
+    // All categories with their unlock thresholds (mirrors _errorCategories.js)
+    const ALL_CATEGORIES = {
+      capture:    { minScore: 0,    label: 'Capturing & Atari',     sensei: 'Atari' },
+      basic_life: { minScore: 0,    label: 'Basic Life & Death',    sensei: 'LifeAndDeath' },
+      connection: { minScore: 0,    label: 'Connection & Cutting',  sensei: 'Cutting' },
+      ladder:     { minScore: 1000, label: 'Ladders & Nets',        sensei: 'Ladder' },
+      ko:         { minScore: 1000, label: 'Ko Fights',             sensei: 'Ko' },
+      shape:      { minScore: 1000, label: 'Stone Shape',           sensei: 'Shape' },
+      direction:  { minScore: 1000, label: 'Direction of Play',     sensei: 'Direction' },
+      joseki:     { minScore: 1500, label: 'Joseki & Opening',      sensei: 'Joseki' },
+      influence:  { minScore: 1500, label: 'Influence & Thickness', sensei: 'Thickness' },
+      endgame:    { minScore: 2000, label: 'Endgame Precision',     sensei: 'Endgame' },
+    };
+
+    let userId      = null;
+    let userProfile = null;
+    let allGames    = [];
+
+    async function init() {
+      const session = await Auth.getSession();
+      if (!session) { location.href = 'auth.html'; return; }
+      userId      = session.user.id;
+      userProfile = await UserDB.getProfile(userId);
+      if (!userProfile) { location.href = 'auth.html'; return; }
+
+      document.getElementById('page-sub').textContent =
+        `${userProfile.current_rank} · pattern analysis across your games`;
+
+      // Fetch all saved games (we need ai_summary to be present)
+      const { data: games } = await sb
+        .from('saved_games')
+        .select('id, created_at, board_size, source, ai_summary')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      allGames = games || [];
+      hide('loading-state');
+
+      const analyzed   = allGames.filter(g => g.ai_summary !== null && g.ai_summary !== undefined);
+      const unanalyzed = allGames.filter(g => g.ai_summary === null || g.ai_summary === undefined);
+
+      // Show backfill option if there are unanalyzed games
+      if (unanalyzed.length > 0) {
+        if (analyzed.length < MIN_GAMES) {
+          show('gate-section');
+          show('backfill-card');
+          const pct = Math.round((analyzed.length / MIN_GAMES) * 100);
+          document.getElementById('gate-bar').style.width = pct + '%';
+          document.getElementById('gate-bar-label').textContent =
+            `${analyzed.length} of ${MIN_GAMES} games analyzed`;
+          document.getElementById('gate-sub').textContent =
+            `Analyze at least ${MIN_GAMES} games to unlock pattern analysis.` +
+            (unanalyzed.length > 0 ? ` You have ${unanalyzed.length} game${unanalyzed.length !== 1 ? 's' : ''} ready to analyze.` : '');
+        } else {
+          show('backfill-card-inline');
+          document.getElementById('backfill-card-inline').querySelector('.backfill-card__sub').textContent =
+            `${unanalyzed.length} saved game${unanalyzed.length !== 1 ? 's' : ''} haven't been analyzed yet. Analyze them to improve pattern accuracy.`;
+          await runAnalysis(analyzed);
+        }
+      } else if (analyzed.length < MIN_GAMES) {
+        show('gate-section');
+        const pct = Math.round((analyzed.length / MIN_GAMES) * 100);
+        document.getElementById('gate-bar').style.width = pct + '%';
+        document.getElementById('gate-bar-label').textContent =
+          `${analyzed.length} of ${MIN_GAMES} games analyzed`;
+        document.getElementById('gate-sub').textContent =
+          `Play and review at least ${MIN_GAMES} games to unlock pattern analysis.`;
+      } else {
+        await runAnalysis(analyzed);
+      }
+    }
+
+    async function runAnalysis(analyzedGames) {
+      const games = analyzedGames || allGames.filter(g => g.ai_summary !== null && g.ai_summary !== undefined);
+
+      hide('error-state');
+      show('analysis-section');
+      document.getElementById('analysis-section').innerHTML =
+        '<div class="loading-state"><span class="loader"></span><span>Analyzing patterns…</span></div>';
+
+      try {
+        const res = await fetch('/.netlify/functions/analyze-patterns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            games: games.map(g => ({ id: g.id, ai_summary: g.ai_summary, created_at: g.created_at })),
+            rank: userProfile.current_rank,
+            rankScore: userProfile.rank_score || 0,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Analysis failed');
+
+        if (data.insufficient) {
+          document.getElementById('analysis-section').innerHTML = '';
+          hide('analysis-section');
+          show('gate-section');
+          const pct = Math.round((data.gamesAnalyzed / MIN_GAMES) * 100);
+          document.getElementById('gate-bar').style.width = pct + '%';
+          document.getElementById('gate-bar-label').textContent =
+            `${data.gamesAnalyzed} of ${MIN_GAMES} games analyzed`;
+          return;
+        }
+
+        renderAnalysis(data, games.length);
+      } catch (e) {
+        hide('analysis-section');
+        document.getElementById('error-msg').textContent = e.message || 'Analysis failed.';
+        show('error-state');
+      }
+    }
+
+    function renderAnalysis(data, gamesAnalyzed) {
+      // Rebuild analysis section from scratch
+      const sec = document.getElementById('analysis-section');
+      sec.innerHTML = '';
+      sec.style.display = '';
+
+      // Progress notes
+      if (data.progressNotes) {
+        const notes = document.createElement('div');
+        notes.className = 'notes-card';
+        notes.style.animationDelay = '0s';
+        notes.textContent = data.progressNotes;
+        sec.appendChild(notes);
+      }
+
+      // Weak areas
+      if (data.topWeakAreas?.length) {
+        const maxCount = data.topWeakAreas[0].count || 1;
+
+        const label = document.createElement('p');
+        label.className = 'section-label';
+        label.style.marginTop = '1.5rem';
+        label.textContent = 'Recurring Weak Areas';
+        sec.appendChild(label);
+
+        const list = document.createElement('div');
+        list.className = 'weak-areas';
+        data.topWeakAreas.forEach((area, i) => {
+          const pct   = Math.round((area.count / maxCount) * 100);
+          const meta  = ALL_CATEGORIES[area.category] || {};
+          const delay = (i * 0.05).toFixed(2);
+          list.innerHTML += `
+            <div class="weak-card" style="animation-delay:${delay}s">
+              <div class="weak-card__header">
+                <span class="weak-card__label">${area.label || meta.label || area.category}</span>
+                <span class="weak-card__count">${area.count}×</span>
+              </div>
+              <div class="weak-card__bar-wrap">
+                <div class="weak-card__bar-fill" style="width:${pct}%"></div>
+              </div>
+              <p class="weak-card__explanation">${area.explanation || ''}</p>
+              ${meta.sensei ? `<a class="weak-card__link" href="${SENSEI_BASE}${meta.sensei}" target="_blank" rel="noopener">Read about this on Sensei's Library →</a>` : ''}
+            </div>
+          `;
+        });
+        sec.appendChild(list);
+      }
+
+      // Study priorities
+      if (data.studyPriorities?.length) {
+        const label = document.createElement('p');
+        label.className = 'section-label';
+        label.style.marginTop = '1.5rem';
+        label.textContent = 'Study Priorities';
+        sec.appendChild(label);
+
+        const list = document.createElement('div');
+        list.className = 'priorities-list';
+        data.studyPriorities.forEach((p, i) => {
+          const delay = (i * 0.05).toFixed(2);
+          const url   = p.senseiKeyword ? `${SENSEI_BASE}${p.senseiKeyword}` : null;
+          list.innerHTML += `
+            <div class="priority-item" style="animation-delay:${delay}s">
+              <span class="priority-num">${p.priority || i + 1}</span>
+              <div>
+                <p class="priority-item__topic">${p.topic}</p>
+                <p class="priority-item__reason">${p.reason || ''}</p>
+                ${url ? `<a class="priority-item__link" href="${url}" target="_blank" rel="noopener">Sensei's Library →</a>` : ''}
+              </div>
+            </div>
+          `;
+        });
+        sec.appendChild(list);
+      }
+
+      // Meta
+      const meta = document.createElement('p');
+      meta.className = 'analysis-meta';
+      meta.style.marginTop = '1rem';
+      meta.textContent = `Based on ${gamesAnalyzed} analyzed game${gamesAnalyzed !== 1 ? 's' : ''} · ${userProfile.current_rank}`;
+      sec.appendChild(meta);
+
+      // Refresh button
+      const btn = document.createElement('button');
+      btn.className = 'btn btn--secondary';
+      btn.style.cssText = 'width:100%;margin:0.75rem 0';
+      btn.textContent = 'Refresh analysis';
+      btn.onclick = () => runAnalysis();
+      sec.appendChild(btn);
+
+      // Locked categories
+      const rankScore  = userProfile.rank_score || 0;
+      const locked = Object.entries(ALL_CATEGORIES)
+        .filter(([, meta]) => rankScore < meta.minScore);
+      if (locked.length) {
+        const lockLabel = document.createElement('p');
+        lockLabel.className = 'section-label';
+        lockLabel.style.marginTop = '1.25rem';
+        lockLabel.textContent = 'Unlocks as you improve';
+        sec.appendChild(lockLabel);
+
+        const grid = document.createElement('div');
+        grid.className = 'locked-grid';
+        locked.forEach(([, meta]) => {
+          grid.innerHTML += `<span class="locked-chip"><span class="locked-chip__lock">🔒</span>${meta.label}</span>`;
+        });
+        sec.appendChild(grid);
+      }
+    }
+
+    // ── Backfill: loop through unanalyzed games one at a time ────────────────
+    let backfillRunning = false;
+
+    async function startBackfill() {
+      if (backfillRunning) return;
+      backfillRunning = true;
+
+      const btnGate   = document.getElementById('backfill-btn');
+      const btnInline = document.getElementById('backfill-btn-inline');
+      const progGate  = document.getElementById('backfill-progress');
+      const progInline= document.getElementById('backfill-progress-inline');
+
+      if (btnGate)   btnGate.disabled   = true;
+      if (btnInline) btnInline.disabled = true;
+
+      const unanalyzed = allGames.filter(g => g.ai_summary === null || g.ai_summary === undefined);
+      let processed = 0;
+
+      const setProgress = msg => {
+        if (progGate)   progGate.textContent   = msg;
+        if (progInline) progInline.textContent = msg;
+      };
+
+      for (const game of unanalyzed) {
+        setProgress(`Analyzing game ${processed + 1} of ${unanalyzed.length}…`);
+        try {
+          // Re-fetch the full SGF for this game
+          const { data: full } = await sb
+            .from('saved_games')
+            .select('sgf_content, board_size')
+            .eq('id', game.id)
+            .single();
+
+          if (!full?.sgf_content) { processed++; continue; }
+
+          const rank        = userProfile.current_rank || '20 kyu';
+          const playerColor = 'B';
+
+          const res = await fetch('/.netlify/functions/game-summary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sgf: full.sgf_content,
+              boardSize: full.board_size,
+              rank,
+              playerColor,
+            }),
+          });
+
+          if (res.ok) {
+            const { summary } = await res.json();
+            if (summary) {
+              // Save ai_summary back to the saved_games row
+              await sb.from('saved_games').update({ ai_summary: summary }).eq('id', game.id);
+              // Update local cache
+              const idx = allGames.findIndex(g => g.id === game.id);
+              if (idx !== -1) allGames[idx].ai_summary = summary;
+            }
+          }
+        } catch (e) {
+          console.warn('Backfill error for game', game.id, e.message);
+        }
+        processed++;
+      }
+
+      setProgress(`Done — analyzed ${processed} game${processed !== 1 ? 's' : ''}.`);
+      backfillRunning = false;
+
+      // Re-run pattern analysis with the newly analyzed games
+      const analyzed = allGames.filter(g => g.ai_summary !== null && g.ai_summary !== undefined);
+      hide('gate-section');
+      hide('backfill-card-inline');
+      if (analyzed.length >= MIN_GAMES) {
+        await runAnalysis(analyzed);
+      } else {
+        show('gate-section');
+        const pct = Math.round((analyzed.length / MIN_GAMES) * 100);
+        document.getElementById('gate-bar').style.width = pct + '%';
+        document.getElementById('gate-bar-label').textContent =
+          `${analyzed.length} of ${MIN_GAMES} games analyzed`;
+      }
+    }
+
+    function show(id) { const el = document.getElementById(id); if (el) el.style.display = ''; }
+    function hide(id) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+
+    init();
+  </script>
+</body>
+</html>

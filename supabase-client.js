@@ -123,6 +123,13 @@ const UserDB = {
     return data;
   },
 
+  async saveAiSummary(gameId, summary) {
+    const { error } = await sb.from('saved_games')
+      .update({ ai_summary: summary })
+      .eq('id', gameId);
+    if (error) console.error('saveAiSummary error:', error);
+  },
+
   async setGamePublic(gameId, isPublic) {
     const { error } = await sb.from('saved_games')
       .update({ public: isPublic })
