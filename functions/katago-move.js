@@ -28,7 +28,7 @@ exports.handler = async (event) => {
     // loading but the HTTP server is already accepting connections.
     let res = null;
     const MAX_ATTEMPTS = 2;
-    const RETRY_DELAY_MS = 4000;
+    const RETRY_DELAY_MS = 1500;
 
     try {
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {

@@ -1,4 +1,4 @@
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const GOCOLS = 'ABCDEFGHJKLMNOPQRST';
 
 function rankToDifficulty(rank) {
