@@ -56,26 +56,15 @@ exports.handler = async (event) => {
     const katago = await katagoEval(sgf, playerColor, boardSize);
 
     if (!katago) {
-      // KataGo unavailable — honest fallback, no invented advice.
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL,
-          max_tokens: 150,
-          system: `You are a Go tutor. The position analysis engine is currently offline, so you cannot evaluate this position. Be honest about this limitation. You may offer only universal Go principles (e.g., "look for the biggest area", "keep groups connected") without making any claims about this specific board position. Under 60 words. No markdown.`,
-          messages: [{
-            role: 'user',
-            content: `Student plays ${playerColor} at ${rank} level. Move ${moveNumber}. The engine is offline — give a brief general principle only.`,
-          }],
-        }),
-      });
-      const data = await res.json();
-      return { statusCode: 200, headers, body: JSON.stringify({ commentary: data.content[0].text }) };
+      // KataGo unavailable — static honest fallback. No Claude call: no position data
+      // means Claude would only produce generic boilerplate, wasting API budget.
+      const offlineHints = [
+        "The analysis engine is offline, so I can't evaluate this position. As a general guide: keep your groups connected and look for the largest open area on the board.",
+        "Engine offline — no position-specific advice available. Focus on fundamentals: secure any weak groups before expanding, and prefer moves that serve multiple purposes.",
+        "The engine is unavailable right now. General principle: look for moves that build connections, reduce your opponent's potential, or take large territorial frameworks.",
+      ];
+      const commentary = offlineHints[moveNumber % offlineHints.length];
+      return { statusCode: 200, headers, body: JSON.stringify({ commentary }) };
     }
 
     // Build area-based description of top moves without leaking exact coordinates.
