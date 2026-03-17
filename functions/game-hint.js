@@ -33,7 +33,7 @@ async function katagoEval(sgf, playerColor, boardSize) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${KATAGO_TOKEN}`,
       },
-      body: JSON.stringify({ sgf, color: playerColor, boardSize, rank: '1 dan' }),
+      body: JSON.stringify({ sgf, color: playerColor, boardSize, rank }),
     }).then(res => res.ok ? res.json() : null).catch(() => null);
     return await Promise.race([fetchResult, timeout]);
   } catch (e) {
