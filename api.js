@@ -21,8 +21,8 @@ const API = (() => {
     evaluateMove(problem, col, row, attemptNumber, rank) {
       return post('evaluate-move', { problem, col, row, attemptNumber, rank });
     },
-    analyzeMove(sgf, moveNumber, boardSize, rank, move, playerColor, currentStones) {
-      return post('analyze-move', { sgf, moveNumber, boardSize, rank, move, playerColor, currentStones });
+    analyzeMove(sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis) {
+      return post('analyze-move', { sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis });
     },
     gameSummary(sgf, boardSize, rank, playerColor) {
       return post('game-summary', { sgf, boardSize, rank, playerColor });

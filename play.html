@@ -333,6 +333,9 @@
           <button class="btn btn--secondary" onclick="resignGame()">Resign</button>
           <button class="btn btn--secondary" onclick="newGame()">New</button>
         </div>
+        <button class="btn btn--primary btn--full" id="retry-engine-btn" onclick="retryEngineMove()" style="display:none;margin-bottom:0.75rem;">
+          ↺ Retry — tap to try Goxira's move again
+        </button>
         <button class="btn btn--accent btn--full" id="hint-btn" onclick="getGameHint()" style="margin-bottom:0.75rem;">
           💬 Ask Goxira for commentary
         </button>
@@ -385,6 +388,8 @@
     let teachingPauseFired = false;
     let teachingPauseSuppressed = false;
     let commentaryGen     = 0; // incremented each move; prevents stale async commentary from overwriting newer text
+    let engineRetryPending = false; // true while showing "engine offline — retry" UI
+    let engineRetrySnapshot = null;
 
     async function init() {
       const session = await Auth.getSession();
@@ -548,21 +553,42 @@
         }).then(r => r.ok ? r.json() : null).catch(() => null);
 
         if (!res?.move) {
-          // KataGo unavailable — save the game and inform the student.
           document.getElementById('claude-thinking').classList.remove('show');
           board.setInteractive(false);
-          gameOver = true;
-          setCommentary(
-            'Goxira\'s engine is temporarily offline. Your game has been saved — ' +
-            'you can review it from your profile when the engine is back.'
-          );
-          try {
-            const session = await Auth.getSession();
-            if (session) {
-              await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play');
-            }
-          } catch(saveErr) { console.error('Save game on engine-down error:', saveErr); }
+          if (engineRetryPending) {
+            // Second failure — give up, save and stop cleanly.
+            engineRetryPending = false;
+            engineRetrySnapshot = null;
+            document.getElementById('retry-engine-btn').style.display = 'none';
+            gameOver = true;
+            setCommentary(
+              "Goxira's engine is offline and couldn't be reached. " +
+              'Your game has been saved — use "New" to start a fresh game, ' +
+              'or tap Review Game to look at what you played.'
+            );
+            try {
+              const session = await Auth.getSession();
+              if (session) {
+                const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play');
+                savedGameId = saved?.id ?? null;
+              }
+            } catch(saveErr) { console.error('Save game on engine-down error:', saveErr); }
+            document.getElementById('game-over-card').classList.add('show');
+          } else {
+            // First failure — offer retry without ending the game.
+            engineRetryPending = true;
+            engineRetrySnapshot = snapshot;
+            setCommentary("Goxira's engine didn't respond. Tap the button below to try again — your game is still going.");
+            document.getElementById('retry-engine-btn').style.display = '';
+          }
           return;
+        }
+
+        // Engine responded — clear any retry state.
+        if (engineRetryPending) {
+          engineRetryPending = false;
+          engineRetrySnapshot = null;
+          document.getElementById('retry-engine-btn').style.display = 'none';
         }
 
         const move = res.move;
@@ -596,12 +622,14 @@
             updateMoveCount();
             setCommentary('Goxira played.');
             // Fetch teaching commentary asynchronously — don't block the game.
+            // Pass res.analysis (already fetched above) so analyze-move skips its own KataGo call.
             const gen = ++commentaryGen;
             const gtpMove = coordsToGTP(move.col, move.row);
             API.analyzeMove(
               buildSGF(), moveNumber, boardSize,
               userProfile?.current_rank || '20 kyu',
-              gtpMove, claudeColor, board.getStones()
+              gtpMove, claudeColor, board.getStones(),
+              res.analysis || null
             ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
              .catch(() => {});
           }
@@ -617,20 +645,41 @@
       } catch(e) {
         console.error('Goxira move error:', e);
         document.getElementById('claude-thinking').classList.remove('show');
-        // Unexpected error — save and stop cleanly rather than corrupting the game record.
         board.setInteractive(false);
-        gameOver = true;
-        setCommentary(
-          'An unexpected error occurred. Your game has been saved — ' +
-          'you can review it from your profile.'
-        );
-        try {
-          const session = await Auth.getSession();
-          if (session) {
-            await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play');
-          }
-        } catch(saveErr) { console.error('Save game on error:', saveErr); }
+        if (engineRetryPending) {
+          // Already retried once — give up.
+          engineRetryPending = false;
+          engineRetrySnapshot = null;
+          document.getElementById('retry-engine-btn').style.display = 'none';
+          gameOver = true;
+          setCommentary(
+            'Goxira ran into an error. Your game has been saved — ' +
+            'tap "Review Game" to see what you played, or "New" to start fresh.'
+          );
+          try {
+            const session = await Auth.getSession();
+            if (session) {
+              const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play');
+              savedGameId = saved?.id ?? null;
+            }
+          } catch(saveErr) { console.error('Save game on error:', saveErr); }
+          document.getElementById('game-over-card').classList.add('show');
+        } else {
+          engineRetryPending = true;
+          engineRetrySnapshot = snapshot;
+          setCommentary("Goxira ran into a network error. Tap the button below to try again.");
+          document.getElementById('retry-engine-btn').style.display = '';
+        }
       }
+    }
+
+    // ── Engine retry ─────────────────────────────────────────────
+    async function retryEngineMove() {
+      if (!engineRetryPending) return;
+      document.getElementById('retry-engine-btn').style.display = 'none';
+      setCommentary('Trying again…');
+      const snap = engineRetrySnapshot;
+      await claudeMove(snap);
     }
 
     // ── Undo ─────────────────────────────────────────────────────

@@ -43,12 +43,18 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   try {
-    const { moveNumber, boardSize, rank, move, playerColor, sgf } = JSON.parse(event.body);
+    const { moveNumber, boardSize, rank, move, playerColor, sgf, precomputedAnalysis } = JSON.parse(event.body);
 
     const toPlayWord = playerColor === 'B' ? 'Black' : 'White';
 
-    // Call KataGo to evaluate the position, if SGF is available.
-    const katago = sgf ? await katagoEval(sgf, playerColor, boardSize, rank) : null;
+    // Use precomputed analysis from katago-move if available — avoids a second KataGo call.
+    // Fall back to a fresh KataGo query only if no precomputed data was provided.
+    let katago = null;
+    if (precomputedAnalysis) {
+      katago = precomputedAnalysis;
+    } else if (sgf) {
+      katago = await katagoEval(sgf, playerColor, boardSize, rank);
+    }
 
     let systemPrompt;
     let userContent;
