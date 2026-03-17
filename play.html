@@ -638,7 +638,7 @@
               buildSGF(), moveNumber, boardSize,
               userProfile?.current_rank || '20 kyu',
               gtpMove, claudeColor, board.getStones(),
-              res.analysis || null
+              res || null
             ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
              .catch(() => {});
           }
