@@ -410,10 +410,22 @@
       goToMove(0);
 
       // 4. Request game summary + KataGo analysis in background
+      loadAnalysis(game, boardSize, playerColor);
+    }
+
+    // ── Game analysis (with retry) ───────────────────────────────
+    function loadAnalysis(game, boardSize, playerColor) {
       const rank = userProfile?.current_rank || '20 kyu';
+      const loadingEl = document.getElementById('analysis-loading');
+      if (loadingEl) {
+        loadingEl.innerHTML = '<span class="loader"></span> Analysing game…';
+      }
       API.gameSummary(game.sgf_content, boardSize, rank, playerColor)
         .then(data => {
-          renderAnalysis(data.summary);
+          // Detect engine-unavailable fallback: no turns and empty keyMoments
+          const engineDown = !data.turns?.length && data.summary?.keyMoments?.length === 0
+            && data.summary?.overallComment?.toLowerCase().includes('unavailable');
+          renderAnalysis(data.summary, engineDown ? () => loadAnalysis(game, boardSize, playerColor) : null);
           if (data.turns?.length) {
             winrateTurns = data.turns;
             renderWinrateChart();
@@ -422,7 +434,18 @@
           }
         })
         .catch(() => {
-          document.getElementById('analysis-loading').textContent = 'Analysis failed — try again later.';
+          const sec = document.getElementById('analysis-section');
+          sec.innerHTML = '';
+          const div = document.createElement('div');
+          div.className = 'overall-comment';
+          div.textContent = 'Engine analysis failed.';
+          const btn = document.createElement('button');
+          btn.className   = 'btn btn--secondary';
+          btn.textContent = '↺ Try again';
+          btn.style.cssText = 'margin-top:0.6rem;display:block;';
+          btn.onclick = () => loadAnalysis(game, boardSize, playerColor);
+          div.appendChild(btn);
+          sec.appendChild(div);
           document.getElementById('winrate-wrap').parentElement.style.display = 'none';
         });
     }
@@ -656,7 +679,7 @@
     }
 
     // ── Analysis panel ────────────────────────────────────────────
-    function renderAnalysis(summary) {
+    function renderAnalysis(summary, retryFn = null) {
       keyMoments = summary.keyMoments || [];
       const sec  = document.getElementById('analysis-section');
       sec.innerHTML = '';
@@ -666,6 +689,15 @@
         const div = document.createElement('div');
         div.className   = 'overall-comment';
         div.textContent = summary.overallComment;
+        // If engine was down, append a retry button inside the comment card
+        if (retryFn) {
+          const btn = document.createElement('button');
+          btn.className   = 'btn btn--secondary';
+          btn.textContent = '↺ Try again';
+          btn.style.cssText = 'margin-top:0.6rem;display:block;';
+          btn.onclick = retryFn;
+          div.appendChild(btn);
+        }
         sec.appendChild(div);
       }
 

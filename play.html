@@ -505,11 +505,20 @@
     // ── Player move ──────────────────────────────────────────────
     async function onPlayerMove(col, row) {
       if (gameOver) return;
-      consecutivePasses = 0;
 
       const snapshot = { stones: board.getStones(), sgfLength: sgfMoves.length, moveNumber };
 
-      board.place(col, row, playerColor);
+      const result = board.place(col, row, playerColor);
+      if (result.illegal) {
+        // Suicide or occupied — board.place() already removed the stone visually.
+        // Do NOT add to SGF or advance the game state; just let the player try again.
+        setCommentary('That intersection is not legal — the stone would have no liberties. Try somewhere else.');
+        board.setInteractive(true);
+        board.setColor(playerColor);
+        return;
+      }
+
+      consecutivePasses = 0;
       moveNumber++;
       addSGFMove(playerColor, col, row);
       updateMoveCount();
