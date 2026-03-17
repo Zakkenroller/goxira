@@ -1,4 +1,4 @@
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const GOCOLS = 'ABCDEFGHJKLMNOPQRST'; // standard Go notation skips I
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
@@ -114,17 +114,17 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
 // Returns { winrate, scoreLead, bestMove, topMoves } or null if KataGo unavailable.
 async function katagoEval(initialStones, playerMove, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 6000));
   try {
-    const res = await fetch(`${KATAGO_SERVICE_URL}/analyze-position`, {
+    const fetchResult = fetch(`${KATAGO_SERVICE_URL}/analyze-position`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${KATAGO_TOKEN}`,
       },
       body: JSON.stringify({ initialStones, moves: [playerMove], boardSize }),
-    });
-    if (!res.ok) return null;
-    return await res.json();
+    }).then(res => res.ok ? res.json() : null).catch(() => null);
+    return await Promise.race([fetchResult, timeout]);
   } catch (e) {
     console.error('KataGo eval error:', e.message);
     return null;

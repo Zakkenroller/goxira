@@ -345,6 +345,8 @@
     let userId         = null;
     let userProfile    = null;
     let totalSolved    = 0;
+    let prefetchedProblem = null;  // next problem preloaded in background
+    let prefetchPromise   = null;  // in-flight prefetch Promise
 
 
     // ── Init ────────────────────────────────────────────────────
@@ -362,6 +364,17 @@
       document.getElementById('stat-solved').textContent = totalSolved;
 
       await loadNewProblem();
+    }
+
+    // ── Problem prefetch ─────────────────────────────────────────
+    // Fires a background request for the next problem so it's ready immediately
+    // when the student presses Next/Skip. Called after rendering each problem.
+    function schedulePrefetch() {
+      if (!userProfile) return;
+      prefetchedProblem = null;
+      prefetchPromise = API.generateProblem(userProfile.current_rank, null, 9)
+        .then(res => { prefetchedProblem = res.problem; return res.problem; })
+        .catch(() => null);
     }
 
     // ── Load a new problem ───────────────────────────────────────
@@ -388,14 +401,35 @@
       }
 
       try {
-        const res = await API.generateProblem(userProfile.current_rank, null, 9);
-        currentProblem = res.problem;
+        let problem = null;
+        if (prefetchedProblem) {
+          // Prefetch already resolved — instant handoff.
+          problem = prefetchedProblem;
+          prefetchedProblem = null;
+          prefetchPromise   = null;
+        } else if (prefetchPromise) {
+          // Prefetch in flight — await it instead of firing a duplicate request.
+          problem = await prefetchPromise;
+          prefetchedProblem = null;
+          prefetchPromise   = null;
+        } else {
+          // First load (no prefetch yet) or prefetch failed — fetch directly.
+          const res = await API.generateProblem(userProfile.current_rank, null, 9);
+          problem = res.problem;
+        }
+
+        if (!problem) throw new Error('No problem returned');
+        currentProblem = problem;
         renderProblem(currentProblem);
+        // Immediately start loading the one after this.
+        schedulePrefetch();
       } catch(e) {
         console.error('Problem load error:', e);
         document.getElementById('problem-description').textContent =
           'Failed to load problem. Tap Skip to try again.';
         document.getElementById('board-loading').style.display = 'none';
+        // Retry prefetch so Skip works.
+        schedulePrefetch();
       }
     }
 
