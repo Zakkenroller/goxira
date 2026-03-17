@@ -120,29 +120,29 @@ exports.handler = async (event) => {
         ? `- You have been given the complete list of current stones above. Do NOT reference any intersection as containing a stone unless it appears in that list. The continuation sequence shows future moves, not existing stones.`
         : `- You do NOT know which stones are on the board. Do not reference specific intersections by coordinate. Describe threats in general terms (e.g., "cuts off your group", "threatens the corner") only.`;
 
-      systemPrompt = `You are Goxira, an AI Go opponent. You just played a move. Explain directly to the student (second person, "you") what your move does and what they should watch out for.
-
-Focus entirely on the THREAT or OPPORTUNITY your move creates for the student — not on evaluating whether your move was good. Do not rank or praise your own move.
+      systemPrompt = `You are a Go teaching assistant describing Goxira's move to the student. Use ONLY the data provided — the win rate and KataGo's expected continuation. Do not try to "explain the move" beyond what the data directly shows.
 
 GROUNDING RULES:
-- Ground every claim in the KataGo continuation sequence provided. If the sequence shows a capturing threat, name it. If it shows territory, say so.
-- Do NOT invent sequences or threats not present in the data.
-- Do NOT fabricate win rates. Use the student's winning chances number exactly if you mention it.
-- If the data doesn't support a claim, say less.
+- State the student's winning chances using the exact number given. Do not editorialize ("very difficult", "hopeless", etc.).
+- Quote the KataGo continuation sequence as-is: "KataGo expects the continuation to go A, B, C..."
+- You may name the general board area the continuation implies (e.g., "the right side", "the top-right corner") — but only in area-level terms, not named intersections.
+- Do NOT claim a move "puts pressure on", "threatens", or "connects to" any intersection unless both intersections appear consecutively or as captures in the KataGo continuation sequence. Spatial proximity on the board is NOT evidence of a tactical relationship.
+- Do NOT invent strategic reasoning ("builds a wall", "seals off", "cuts your group") not directly shown by the continuation.
+- Do NOT fabricate win rates or sequences. Use only the data given.
 ${coordinateRule}
 
 TEACHING CALIBRATION (student is ${rank}):
-- 25k–15k: One plain sentence on the immediate threat. Keep it concrete.
-- 15k–5k: Name the threat and the strategic idea behind the move.
-- 5k–1d+: Explain the strategic implication, timing, and key response area.
+- 25k–15k: Win rate sentence + continuation sequence. That's it.
+- 15k–5k: Win rate + continuation + one sentence on the general area implied.
+- 5k–1d+: Win rate + continuation + one sentence on what the continuation suggests strategically (area-level only).
 
-Under 80 words. No markdown. No "I think." Speak as Goxira to the student.`;
+Under 80 words. No markdown. Plain language.`;
 
       userContent = `Goxira (${toPlayWord}) just played ${move} on move ${moveNumber} of a ${boardSize}×${boardSize} game.
 ${boardStateStr}
 Student's winning chances: ${studentWinPct}%.${studentScoreStr}
 ${pvStr}
-Tell the student what this move does and what to watch out for.`;
+Describe the situation to the student using only the data above.`;
     } else {
       // KataGo unavailable — honest fallback with generic thematic commentary only.
       systemPrompt = `You are a Go tutor offering educational commentary on a student's game. The position analysis engine is currently offline, so you cannot evaluate whether this specific move was good or bad.
