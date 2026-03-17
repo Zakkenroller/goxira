@@ -391,12 +391,19 @@
     let engineRetryPending = false; // true while showing "engine offline — retry" UI
     let engineRetrySnapshot = null;
     let handicapStones    = []; // GTP coordinate strings for Black's pre-placed handicap stones
+    let humanSLEnabled    = false; // true when katago-service has the human SL model loaded
 
     async function init() {
       const session = await Auth.getSession();
       if (!session) { location.href = 'auth.html'; return; }
       userId      = session.user.id;
       userProfile = await UserDB.getProfile(userId);
+      // Check once whether the human SL model is available. When it is, we skip
+      // handicap stones because humanSL already plays at the player's rank level.
+      try {
+        const r = await fetch('/.netlify/functions/engine-status');
+        if (r.ok) { const d = await r.json(); humanSLEnabled = !!d.humanSL; }
+      } catch (_) { /* non-fatal — fall back to visit-throttling + handicap */ }
     }
 
     function selectSize(el) {
@@ -421,8 +428,8 @@
       document.getElementById('game-screen').style.display  = 'block';
 
       // Compute handicap from effective rank (so difficulty adjusts it too).
-      // In handicap Go, the weaker player always plays Black; White moves first.
-      const handicapCount = rankToHandicap(getEffectiveRank());
+      // Skip when humanSL is active — the engine already plays at the player's rank level.
+      const handicapCount = humanSLEnabled ? 0 : rankToHandicap(getEffectiveRank());
       handicapStones = (HANDICAP_POSITIONS[boardSize] ?? [])[Math.min(handicapCount, 9)] ?? [];
       if (handicapStones.length > 0) {
         playerColor = 'B';

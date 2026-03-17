@@ -6,11 +6,12 @@ const { spawn } = require('child_process');
 const readline = require('readline');
 const http = require('http');
 
-const KATAGO_BINARY = process.env.KATAGO_BINARY || '/usr/local/bin/katago';
-const KATAGO_MODEL  = process.env.KATAGO_MODEL  || '/opt/katago/model.bin.gz';
-const KATAGO_CONFIG = process.env.KATAGO_CONFIG || '/opt/katago/analysis.cfg';
-const PORT          = parseInt(process.env.PORT || '3000');
-const AUTH_TOKEN    = process.env.KATAGO_TOKEN;
+const KATAGO_BINARY      = process.env.KATAGO_BINARY      || '/usr/local/bin/katago';
+const KATAGO_MODEL       = process.env.KATAGO_MODEL       || '/opt/katago/model.bin.gz';
+const KATAGO_CONFIG      = process.env.KATAGO_CONFIG      || '/opt/katago/analysis.cfg';
+const KATAGO_HUMAN_MODEL = process.env.KATAGO_HUMAN_MODEL || ''; // optional; enables humanSL play
+const PORT               = parseInt(process.env.PORT || '3000');
+const AUTH_TOKEN         = process.env.KATAGO_TOKEN;
 
 // ---------- KataGo engine ----------
 
@@ -26,11 +27,9 @@ class KataGoEngine {
   }
 
   start() {
-    this.proc = spawn(KATAGO_BINARY, [
-      'analysis',
-      '-model', KATAGO_MODEL,
-      '-config', KATAGO_CONFIG,
-    ]);
+    const args = ['analysis', '-model', KATAGO_MODEL, '-config', KATAGO_CONFIG];
+    if (KATAGO_HUMAN_MODEL) args.push('-human-model', KATAGO_HUMAN_MODEL);
+    this.proc = spawn(KATAGO_BINARY, args);
 
     // Watchdog: if KataGo doesn't report ready within 120s, it's stuck —
     // kill it and let the exit handler trigger a fresh restart.
@@ -167,6 +166,18 @@ function gtpToCoords(gtp, boardSize) {
   return { col, row };
 }
 
+// Convert "20 kyu" / "5 dan" to a KataGoHuman profile string e.g. "rank_20k" / "rank_5d".
+// Returns null when the human model is not loaded or the rank cannot be parsed.
+function rankToHumanSLProfile(rank) {
+  if (!KATAGO_HUMAN_MODEL || !rank) return null;
+  const m = rank.match(/(\d+)\s*(kyu|dan)/i);
+  if (!m) return null;
+  const n    = parseInt(m[1]);
+  const type = m[2].toLowerCase();
+  if (type === 'kyu') return `rank_${Math.min(20, Math.max(1, n))}k`;
+  return `rank_${Math.min(9, Math.max(1, n))}d`;
+}
+
 // Scale KataGo strength by limiting visits based on opponent rank
 function rankToMaxVisits(rank) {
   if (!rank) return 200;
@@ -225,7 +236,7 @@ const server = http.createServer(async (req, res) => {
 
   // Health check (GET or POST)
   if (req.url === '/health') {
-    return respond(res, 200, { ok: true, ready: engine.ready });
+    return respond(res, 200, { ok: true, ready: engine.ready, humanSL: !!KATAGO_HUMAN_MODEL });
   }
 
   if (req.method !== 'POST') return respond(res, 405, { error: 'method not allowed' });
@@ -249,6 +260,7 @@ const server = http.createServer(async (req, res) => {
       ? handicapStones.map(gtp => ['B', gtp])
       : parseInitialStones(sgf, boardSize);
 
+    const humanSLProfile = rankToHumanSLProfile(rank);
     try {
       const result = await engine.query({
         ...(initialStones.length > 0 ? { initialStones, initialPlayer: 'W' } : {}),
@@ -258,7 +270,10 @@ const server = http.createServer(async (req, res) => {
         boardXSize: boardSize,
         boardYSize: boardSize,
         analyzeTurns: [moves.length],
-        maxVisits: rankToMaxVisits(rank),
+        // humanSL: 10 visits lets the engine search briefly while still respecting human policy.
+        // Fallback: visit-throttle by rank when human model is not loaded.
+        maxVisits: humanSLProfile ? 10 : rankToMaxVisits(rank),
+        ...(humanSLProfile ? { overrideSettings: { humanSLProfile } } : {}),
       });
 
       const topMoves = (result.moveInfos || []).slice(0, 5).map(m => ({
