@@ -242,9 +242,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     const moves = parseSGFMoves(sgf, boardSize);
+    // Prefer explicit handicapStones from the caller; fall back to parsing AB[]
+    // from the SGF header so callers like game-hint.js get correct context
+    // without needing to know about handicap stones.
     const initialStones = Array.isArray(handicapStones)
       ? handicapStones.map(gtp => ['B', gtp])
-      : [];
+      : parseInitialStones(sgf, boardSize);
 
     try {
       const result = await engine.query({
