@@ -225,18 +225,22 @@ const server = http.createServer(async (req, res) => {
 
   // POST /move — get best move for a position
   if (req.url === '/move') {
-    const { sgf, color, boardSize, rank } = body;
+    const { sgf, color, boardSize, rank, handicapStones, komi: komiOverride } = body;
     if (!sgf || !color || !boardSize) {
       return respond(res, 400, { error: 'missing required fields: sgf, color, boardSize' });
     }
 
     const moves = parseSGFMoves(sgf, boardSize);
+    const initialStones = Array.isArray(handicapStones)
+      ? handicapStones.map(gtp => ['B', gtp])
+      : [];
 
     try {
       const result = await engine.query({
+        ...(initialStones.length > 0 ? { initialStones } : {}),
         moves,
         rules: 'chinese',
-        komi: komi(boardSize),
+        komi: komiOverride ?? komi(boardSize),
         boardXSize: boardSize,
         boardYSize: boardSize,
         analyzeTurns: [moves.length],
