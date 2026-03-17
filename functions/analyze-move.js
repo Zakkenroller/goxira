@@ -34,6 +34,18 @@ function formatTopMovesForPrompt(topMoves, toPlayWord, playedMove) {
   }).join('\n');
 }
 
+// Convert board.getStones() object ({"col,row": "B"|"W"}) to GTP coordinate lists.
+const COLS = 'ABCDEFGHJKLMNOPQRST';
+function stonesToGTP(stonesObj, boardSize) {
+  const black = [], white = [];
+  for (const [key, color] of Object.entries(stonesObj || {})) {
+    const [c, r] = key.split(',').map(Number);
+    const gtp = COLS[c] + (boardSize - r);
+    if (color === 'B') black.push(gtp); else white.push(gtp);
+  }
+  return { black, white };
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -43,7 +55,7 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   try {
-    const { moveNumber, boardSize, rank, move, playerColor, sgf, precomputedAnalysis } = JSON.parse(event.body);
+    const { moveNumber, boardSize, rank, move, playerColor, sgf, precomputedAnalysis, currentStones } = JSON.parse(event.body);
 
     const toPlayWord = playerColor === 'B' ? 'Black' : 'White';
 
@@ -92,18 +104,32 @@ exports.handler = async (event) => {
       // Principal variation of Goxira's actual move — grounds threat claims without fabrication.
       const goxiraMoveData = topMoves.find(m => m.move === move) || topMoves[0];
       const pvStr = goxiraMoveData?.pv?.length
-        ? `KataGo expected follow-up: ${goxiraMoveData.pv.slice(0, 5).join(', ')}`
+        ? `KataGo expected continuation (FUTURE moves, not current stones): ${goxiraMoveData.pv.slice(0, 5).join(', ')}`
         : '';
+
+      // Board state — lets Claude reference only stones that actually exist.
+      // currentStones is sent by the frontend as board.getStones().
+      const hasBoardState = currentStones && Object.keys(currentStones).length > 0;
+      let boardStateStr = '';
+      if (hasBoardState) {
+        const { black, white } = stonesToGTP(currentStones, boardSize);
+        boardStateStr = `Current stones on the board — Black: ${black.join(', ') || 'none'}. White: ${white.join(', ') || 'none'}.`;
+      }
+
+      const coordinateRule = hasBoardState
+        ? `- You have been given the complete list of current stones above. Do NOT reference any intersection as containing a stone unless it appears in that list. The continuation sequence shows future moves, not existing stones.`
+        : `- You do NOT know which stones are on the board. Do not reference specific intersections by coordinate. Describe threats in general terms (e.g., "cuts off your group", "threatens the corner") only.`;
 
       systemPrompt = `You are Goxira, an AI Go opponent. You just played a move. Explain directly to the student (second person, "you") what your move does and what they should watch out for.
 
 Focus entirely on the THREAT or OPPORTUNITY your move creates for the student — not on evaluating whether your move was good. Do not rank or praise your own move.
 
 GROUNDING RULES:
-- Ground every claim in the KataGo follow-up sequence provided. If the sequence shows a capturing threat, name it. If it shows territory, say so.
+- Ground every claim in the KataGo continuation sequence provided. If the sequence shows a capturing threat, name it. If it shows territory, say so.
 - Do NOT invent sequences or threats not present in the data.
 - Do NOT fabricate win rates. Use the student's winning chances number exactly if you mention it.
 - If the data doesn't support a claim, say less.
+${coordinateRule}
 
 TEACHING CALIBRATION (student is ${rank}):
 - 25k–15k: One plain sentence on the immediate threat. Keep it concrete.
@@ -113,6 +139,7 @@ TEACHING CALIBRATION (student is ${rank}):
 Under 80 words. No markdown. No "I think." Speak as Goxira to the student.`;
 
       userContent = `Goxira (${toPlayWord}) just played ${move} on move ${moveNumber} of a ${boardSize}×${boardSize} game.
+${boardStateStr}
 Student's winning chances: ${studentWinPct}%.${studentScoreStr}
 ${pvStr}
 Tell the student what this move does and what to watch out for.`;
