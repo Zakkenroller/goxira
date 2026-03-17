@@ -95,3 +95,34 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- ── Tsumego Problems (canon problem library, ~4,000 problems) ────────────
+-- This table must be seeded separately from the schema.
+-- The problem data is not included here because it is large (~4,000 rows)
+-- and sourced from published collections (Gokyo Shumyo, Cho Elementary, etc.)
+--
+-- To self-host with problems:
+--   1. Run this schema file to create all tables.
+--   2. Obtain or export the tsumego_problems dataset (ask the maintainers or
+--      see the project wiki for the canonical CSV/JSON dump).
+--   3. Import via: Supabase Dashboard → Table Editor → tsumego_problems → Import,
+--      or with psql: \copy public.tsumego_problems FROM 'problems.csv' CSV HEADER;
+--
+-- Without this table seeded, the /problems.html page will error on load.
+
+create table public.tsumego_problems (
+  id           uuid primary key default uuid_generate_v4(),
+  source       text not null,         -- e.g. 'gokyo_shumyo', 'cho_elementary'
+  difficulty   integer not null check (difficulty in (1, 2, 3)),
+  board_size   integer not null check (board_size in (9, 13, 19)),
+  to_play      text not null check (to_play in ('B', 'W')),
+  stones       jsonb not null,        -- { "col,row": "B"|"W", ... }
+  solution_col integer not null,
+  solution_row integer not null
+);
+
+alter table public.tsumego_problems enable row level security;
+
+-- Problems are read-only for authenticated users (no user-owned rows)
+create policy "Problems: read for authenticated" on public.tsumego_problems
+  for select using (auth.role() = 'authenticated');

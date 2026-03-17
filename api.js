@@ -1,15 +1,25 @@
 const API = (() => {
-  async function post(endpoint, body) {
-    const res = await fetch(`/.netlify/functions/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Network error' }));
-      throw new Error(err.error || `HTTP ${res.status}`);
+  async function post(endpoint, body, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`/.netlify/functions/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Network error' }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      return res.json();
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+      throw e;
+    } finally {
+      clearTimeout(timer);
     }
-    return res.json();
   }
   return {
     assess(messages, userContext) {
