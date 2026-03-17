@@ -23,7 +23,7 @@ function moveToArea(gtp, boardSize) {
 
 // Call KataGo /move to get top 5 candidate moves.
 // Uses full strength for accurate eval.
-async function katagoEval(sgf, playerColor, boardSize) {
+async function katagoEval(sgf, playerColor, boardSize, rank) {
   if (!KATAGO_SERVICE_URL || !sgf) return null;
   const timeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
   try {
@@ -53,7 +53,7 @@ exports.handler = async (event) => {
   try {
     const { sgf, boardSize, rank, playerColor, currentStones, moveNumber } = JSON.parse(event.body);
 
-    const katago = await katagoEval(sgf, playerColor, boardSize);
+    const katago = await katagoEval(sgf, playerColor, boardSize, rank);
 
     if (!katago) {
       // KataGo unavailable — static honest fallback. No Claude call: no position data
