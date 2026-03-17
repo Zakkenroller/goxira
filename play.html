@@ -384,6 +384,7 @@
     let savedGameId       = null;
     let teachingPauseFired = false;
     let teachingPauseSuppressed = false;
+    let commentaryGen     = 0; // incremented each move; prevents stale async commentary from overwriting newer text
 
     async function init() {
       const session = await Auth.getSession();
@@ -508,6 +509,7 @@
       addSGFMove(playerColor, col, row);
       updateMoveCount();
       updateTurnIndicator(claudeColor);
+      commentaryGen++;
       setCommentary('…');
       board.setInteractive(false);
       document.getElementById('undo-btn').disabled = true;
@@ -592,7 +594,16 @@
             moveNumber++;
             addSGFMove(claudeColor, move.col, move.row);
             updateMoveCount();
-            setCommentary(move.thinking || 'Goxira played.');
+            setCommentary('Goxira played.');
+            // Fetch teaching commentary asynchronously — don't block the game.
+            const gen = ++commentaryGen;
+            const gtpMove = coordsToGTP(move.col, move.row);
+            API.analyzeMove(
+              buildSGF(), moveNumber, boardSize,
+              userProfile?.current_rank || '20 kyu',
+              gtpMove, claudeColor, board.getStones()
+            ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
+             .catch(() => {});
           }
         }
 
@@ -862,7 +873,9 @@
     function newGame() { location.reload(); }
 
     // ── SGF ───────────────────────────────────────────────────────
-    const SGFCOLS = 'abcdefghijklmnopqrs';
+    const SGFCOLS    = 'abcdefghijklmnopqrs';
+    const GTPCOLS    = 'ABCDEFGHJKLMNOPQRST'; // GTP skips I
+    function coordsToGTP(col, row) { return GTPCOLS[col] + (boardSize - row); }
     function addSGFMove(color, col, row) { sgfMoves.push(`;${color}[${SGFCOLS[col]}${SGFCOLS[row]}]`); }
     function addSGFPass(color)           { sgfMoves.push(`;${color}[]`); }
     function buildSGF()                  { return `(;GM[1]FF[4]SZ[${boardSize}]${sgfMoves.join('')})`; }
