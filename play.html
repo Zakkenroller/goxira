@@ -390,6 +390,7 @@
     let commentaryGen     = 0; // incremented each move; prevents stale async commentary from overwriting newer text
     let engineRetryPending = false; // true while showing "engine offline — retry" UI
     let engineRetrySnapshot = null;
+    let handicapStones    = []; // GTP coordinate strings for Black's pre-placed handicap stones
 
     async function init() {
       const session = await Auth.getSession();
@@ -419,6 +420,15 @@
       document.getElementById('setup-screen').style.display = 'none';
       document.getElementById('game-screen').style.display  = 'block';
 
+      // Compute handicap from effective rank (so difficulty adjusts it too).
+      // In handicap Go, the weaker player always plays Black; White moves first.
+      const handicapCount = rankToHandicap(getEffectiveRank());
+      handicapStones = (HANDICAP_POSITIONS[boardSize] ?? [])[Math.min(handicapCount, 9)] ?? [];
+      if (handicapStones.length > 0) {
+        playerColor = 'B';
+        claudeColor = 'W';
+      }
+
       const pStone = document.getElementById('tag-player-stone');
       const cStone = document.getElementById('tag-claude-stone');
       pStone.className = `player-tag__stone player-tag__stone--${playerColor.toLowerCase()}`;
@@ -426,10 +436,22 @@
       document.getElementById('commentary-color').textContent = playerColor === 'B' ? 'Black' : 'White';
 
       board = Board.create(document.getElementById('board-container'), boardSize, onPlayerMove);
+
+      // Place handicap stones on the board before the game begins.
+      if (handicapStones.length > 0) {
+        for (const gtp of handicapStones) {
+          const col = GTPCOLS.indexOf(gtp[0]);
+          const row = boardSize - parseInt(gtp.slice(1)); // 0-indexed from top
+          board.place(col, row, 'B');
+        }
+        setCommentary(`You have ${handicapStones.length} handicap stone${handicapStones.length > 1 ? 's' : ''}. Goxira plays first.`);
+      }
+
       board.setColor('B');
       updateTurnIndicator('B');
 
-      if (playerColor === 'W') await claudeMove();
+      // White plays first in handicap games (Black's stones are already placed).
+      if (playerColor === 'W' || handicapStones.length > 0) await claudeMove();
     }
 
     // ── Legal move helpers ────────────────────────────────────────
@@ -556,6 +578,7 @@
         const movePayload = JSON.stringify({
           sgf: buildSGF(), color: claudeColor, boardSize,
           rank: getEffectiveRank(), currentStones: board.getStones(),
+          ...(handicapStones.length > 0 ? { handicapStones, komi: 0.5 } : {}),
         });
         const res = await fetch('/.netlify/functions/katago-move', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: movePayload,
@@ -738,7 +761,7 @@
     // ── Area scoring (Chinese rules) ────────────────────────────
     function areaScore() {
       const stones = board.getStones();
-      const komi = boardSize === 19 ? 7.5 : boardSize === 13 ? 6.5 : 5.5;
+      const komi = handicapStones.length > 0 ? 0.5 : (boardSize === 19 ? 7.5 : boardSize === 13 ? 6.5 : 5.5);
       let blackStones = 0, whiteStones = 0;
 
       // Count stones on the board
@@ -936,7 +959,74 @@
     function coordsToGTP(col, row) { return GTPCOLS[col] + (boardSize - row); }
     function addSGFMove(color, col, row) { sgfMoves.push(`;${color}[${SGFCOLS[col]}${SGFCOLS[row]}]`); }
     function addSGFPass(color)           { sgfMoves.push(`;${color}[]`); }
-    function buildSGF()                  { return `(;GM[1]FF[4]SZ[${boardSize}]${sgfMoves.join('')})`; }
+    function buildSGF() {
+      // row=0 is top in board coords, which already matches SGF row order, so SGFCOLS[row] is correct.
+      const haTag = handicapStones.length > 0
+        ? `HA[${handicapStones.length}]KM[0.5]AB` + handicapStones.map(gtp => {
+            const col = GTPCOLS.indexOf(gtp[0]);
+            const row = boardSize - parseInt(gtp.slice(1)); // 0-indexed from top
+            return `[${SGFCOLS[col]}${SGFCOLS[row]}]`;
+          }).join('')
+        : '';
+      return `(;GM[1]FF[4]SZ[${boardSize}]${haTag}${sgfMoves.join('')})`;
+    }
+
+    // ── Handicap ──────────────────────────────────────────────────
+    // Standard star-point positions in GTP notation: corners first, sides next, centre last.
+    // These counts are estimates calibrated to KataGo's residual strength at each visit level —
+    // empirical tuning is recommended once real game data is available.
+    const HANDICAP_POSITIONS = {
+      9: [
+        [],
+        ['E5'],
+        ['G7','C3'],
+        ['G7','C3','C7'],
+        ['G7','C3','G3','C7'],
+        ['G7','C3','G3','C7','E5'],
+        ['G7','C3','G3','C7','E3','E7'],
+        ['G7','C3','G3','C7','E3','E7','E5'],
+        ['G7','C3','G3','C7','C5','G5','E3','E7'],
+        ['G7','C3','G3','C7','C5','G5','E3','E7','E5'],
+      ],
+      13: [
+        [],
+        ['G7'],
+        ['K10','D4'],
+        ['K10','D4','K4'],
+        ['K10','D4','K4','D10'],
+        ['K10','D4','K4','D10','G7'],
+        ['K10','D4','K4','D10','D7','K7'],
+        ['K10','D4','K4','D10','D7','K7','G7'],
+        ['K10','D4','K4','D10','D7','K7','G4','G10'],
+        ['K10','D4','K4','D10','D7','K7','G4','G10','G7'],
+      ],
+      19: [
+        [],
+        ['K10'],
+        ['Q16','D4'],
+        ['Q16','D4','Q4'],
+        ['Q16','D4','Q4','D16'],
+        ['Q16','D4','Q4','D16','K10'],
+        ['Q16','D4','Q4','D16','D10','Q10'],
+        ['Q16','D4','Q4','D16','D10','Q10','K10'],
+        ['Q16','D4','Q4','D16','D10','Q10','K4','K16'],
+        ['Q16','D4','Q4','D16','D10','Q10','K4','K16','K10'],
+      ],
+    };
+
+    function rankToHandicap(rank) {
+      if (!rank) return 0;
+      const m = rank.match(/(\d+)\s*(kyu|dan)/i);
+      if (!m || m[2].toLowerCase() === 'dan') return 0;
+      const kyu = parseInt(m[1]);
+      if (kyu >= 20) return 9;
+      if (kyu >= 18) return 8;
+      if (kyu >= 15) return 6;
+      if (kyu >= 12) return 4;
+      if (kyu >= 8)  return 3;
+      if (kyu >= 5)  return 2;
+      return 1; // 1–4 kyu
+    }
 
     // ── UI ────────────────────────────────────────────────────────
     function setCommentary(text) {

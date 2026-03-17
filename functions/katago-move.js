@@ -18,7 +18,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { sgf, color, boardSize, rank } = JSON.parse(event.body);
+    const { sgf, color, boardSize, rank, handicapStones, komi } = JSON.parse(event.body);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 22000);
@@ -47,7 +47,9 @@ exports.handler = async (event) => {
               'Authorization': `Bearer ${KATAGO_TOKEN}`,
             },
             signal: controller.signal,
-            body: JSON.stringify({ sgf, color, boardSize, rank }),
+            body: JSON.stringify({ sgf, color, boardSize, rank,
+              ...(handicapStones?.length ? { handicapStones, komi } : {}),
+            }),
           });
         } catch (fetchErr) {
           // AbortError (timeout) or network error — no point retrying.
