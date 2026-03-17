@@ -150,7 +150,7 @@ async function enrichWithText(problem, rank) {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 250,
-        system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond ONLY with JSON, no markdown:
+        system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond with a single valid JSON object and nothing else. Do not use markdown code fences. Use this exact shape:
 {"description":"one sentence describing the task for ${toPlayWord} to play","hint":"Socratic hint pointing to the key tactical idea without revealing the answer coordinate","explanation":"one or two sentences explaining why ${solutionNote} is correct — use ONLY the verified board facts provided, do not add or invent anything"}
 
 ACCURACY CONTRACT:
@@ -161,16 +161,14 @@ Verified board facts are computed by a deterministic rules engine. They are grou
         messages: [{
           role: 'user',
           content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote}. Student rank: ${rank}.\n\n${factsStr}`,
-        }, {
-          role: 'assistant',
-          content: '{',
         }],
       }),
     });
 
+    if (!res.ok) throw new Error(`Claude API error ${res.status}`);
     const data = await res.json();
-    const text = '{' + data.content[0].text.replace(/```json|```/g, '').trim();
-    return JSON.parse(text);
+    const raw = data.content[0].text.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
+    return JSON.parse(raw);
   } catch (e) {
     // Safe fallback: use the raw facts directly, no LLM required
     const fallbackExplanation = facts.captured.length
