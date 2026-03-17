@@ -4,7 +4,7 @@ const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
 // Call KataGo /move with the full SGF to get top 5 candidate moves at this position.
-async function katagoEval(sgf, playerColor, boardSize) {
+async function katagoEval(sgf, playerColor, boardSize, rank) {
   if (!KATAGO_SERVICE_URL || !sgf) return null;
   const timeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
   try {
@@ -14,7 +14,7 @@ async function katagoEval(sgf, playerColor, boardSize) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${KATAGO_TOKEN}`,
       },
-      body: JSON.stringify({ sgf, color: playerColor, boardSize, rank: '1 dan' }),
+      body: JSON.stringify({ sgf, color: playerColor, boardSize, rank }),
     }).then(res => res.ok ? res.json() : null).catch(() => null);
     return await Promise.race([fetchResult, timeout]);
   } catch (e) {
@@ -48,7 +48,7 @@ exports.handler = async (event) => {
     const toPlayWord = playerColor === 'B' ? 'Black' : 'White';
 
     // Call KataGo to evaluate the position, if SGF is available.
-    const katago = sgf ? await katagoEval(sgf, playerColor, boardSize) : null;
+    const katago = sgf ? await katagoEval(sgf, playerColor, boardSize, rank) : null;
 
     let systemPrompt;
     let userContent;
