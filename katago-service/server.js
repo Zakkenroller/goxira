@@ -147,6 +147,17 @@ function parseSGFMoves(sgf, boardSize) {
   return moves;
 }
 
+// Extract AB[] handicap stones from SGF header into KataGo initialStones format.
+function parseInitialStones(sgf, boardSize) {
+  const abProp = sgf.match(/\bAB((?:\[[a-z]{2}\])+)/);
+  if (!abProp) return [];
+  return [...abProp[1].matchAll(/\[([a-z]{2})\]/g)].map(m => {
+    const c = m[1].charCodeAt(0) - 97;
+    const r = m[1].charCodeAt(1) - 97;
+    return ['B', COLS[c] + (boardSize - r)];
+  });
+}
+
 // GTP move ("Q4") -> goxira {col, row}
 function gtpToCoords(gtp, boardSize) {
   if (!gtp || gtp.toLowerCase() === 'pass') return { col: -1, row: -1 };
@@ -237,7 +248,7 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const result = await engine.query({
-        ...(initialStones.length > 0 ? { initialStones } : {}),
+        ...(initialStones.length > 0 ? { initialStones, initialPlayer: 'W' } : {}),
         moves,
         rules: 'chinese',
         komi: komiOverride ?? komi(boardSize),
@@ -290,6 +301,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const moves = parseSGFMoves(sgf, boardSize);
+    const initialStones = parseInitialStones(sgf, boardSize);
     if (moves.length === 0) {
       return respond(res, 200, { turns: [] });
     }
@@ -304,9 +316,10 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const results = await engine.queryAll({
+        ...(initialStones.length > 0 ? { initialStones, initialPlayer: 'W' } : {}),
         moves,
         rules: 'chinese',
-        komi: komi(boardSize),
+        komi: initialStones.length > 0 ? 0.5 : komi(boardSize),
         boardXSize: boardSize,
         boardYSize: boardSize,
         analyzeTurns,
