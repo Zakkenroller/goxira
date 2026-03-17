@@ -68,6 +68,18 @@ exports.handler = async (event) => {
       const scoreStr  = scoreLead != null
         ? ` Score lead: ${scoreLead > 0 ? '+' : ''}${scoreLead.toFixed(1)} pts for ${scoreLead > 0 ? 'Black' : 'White'}.`
         : '';
+
+      // When KataGo returns a result but no candidate moves, we have win rate data only.
+      // Do NOT call Claude — there is nothing to ground move-quality analysis in, and
+      // Claude will confabulate strategic reasoning for the specific move.
+      if (!topMoves.length) {
+        const scoreNote = scoreLead != null
+          ? ` Score lead: ${scoreLead > 0 ? '+' : ''}${Math.abs(scoreLead).toFixed(1)} for ${scoreLead > 0 ? 'Black' : 'White'}.`
+          : '';
+        const message = `KataGo evaluated this position at ${winPct}% for ${toPlayWord}.${scoreNote} Candidate move data wasn't returned, so move quality can't be assessed.`;
+        return { statusCode: 200, headers, body: JSON.stringify({ message, isCritical: false, moveNumber }) };
+      }
+
       const studentRank = topMoves.findIndex(m => m.move === move);
       const rankStr = studentRank >= 0
         ? ` ${toPlayWord}'s move (${move}) ranks #${studentRank + 1} of KataGo's top 5.`
