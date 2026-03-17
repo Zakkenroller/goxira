@@ -61,60 +61,61 @@ exports.handler = async (event) => {
 
     if (katago) {
       const topMoves = katago.analysis?.topMoves || [];
-      const winrate  = katago.winrate ?? 0.5;
-      const playerWr = playerColor === 'B' ? winrate : (1 - winrate);
-      const winPct   = Math.round(playerWr * 100);
+      const winrate   = katago.winrate ?? 0.5;
+      const goxiraWr  = playerColor === 'B' ? winrate : (1 - winrate);
+      const winPct    = Math.round(goxiraWr * 100); // Goxira's %, used to derive student's below
       const scoreLead = katago.scoreLead;
-      const scoreStr  = scoreLead != null
-        ? ` Score lead: ${scoreLead > 0 ? '+' : ''}${scoreLead.toFixed(1)} pts for ${scoreLead > 0 ? 'Black' : 'White'}.`
-        : '';
 
       // When KataGo returns a result but no candidate moves, we have win rate data only.
       // Do NOT call Claude — there is nothing to ground move-quality analysis in, and
       // Claude will confabulate strategic reasoning for the specific move.
       if (!topMoves.length) {
-        const scoreNote = scoreLead != null
-          ? ` Score lead: ${scoreLead > 0 ? '+' : ''}${Math.abs(scoreLead).toFixed(1)} for ${scoreLead > 0 ? 'Black' : 'White'}.`
+        const studentWinPct = 100 - winPct;
+        const studentScoreLead = scoreLead != null ? (playerColor === 'B' ? -scoreLead : scoreLead) : null;
+        const scoreNote = studentScoreLead != null
+          ? ` You are ${studentScoreLead >= 0 ? '+' : ''}${studentScoreLead.toFixed(1)} pts ${studentScoreLead >= 0 ? 'ahead' : 'behind'}.`
           : '';
-        const message = `KataGo evaluated this position at ${winPct}% for ${toPlayWord}.${scoreNote} Candidate move data wasn't returned, so move quality can't be assessed.`;
+        const message = `Your winning chances: ${studentWinPct}%.${scoreNote} (No follow-up sequence data was returned, so I can't explain the threat in detail.)`;
         return { statusCode: 200, headers, body: JSON.stringify({ message, isCritical: false, moveNumber }) };
       }
 
-      const studentRank = topMoves.findIndex(m => m.move === move);
-      const rankStr = studentRank >= 0
-        ? ` ${toPlayWord}'s move (${move}) ranks #${studentRank + 1} of KataGo's top 5.`
-        : topMoves.length > 0
-          ? ` ${toPlayWord}'s move (${move}) is not in KataGo's top 5.`
-          : '';
-      const topMovesStr = formatTopMovesForPrompt(topMoves, toPlayWord, move);
-      const bestMove = topMoves[0]?.move;
-      const bestWr = topMoves[0] ? Math.round((topMoves[0].winrate ?? 0) * 100) : null;
-      const delta = topMoves[0] && studentRank >= 0
-        ? Math.round((topMoves[studentRank].winrate - topMoves[0].winrate) * 100)
+      // Winrate and score always from the student's perspective.
+      // playerColor is Goxira's color, so the student is the opposite.
+      const studentWinPct = 100 - winPct;
+      const studentScoreLead = scoreLead != null
+        ? (playerColor === 'B' ? -scoreLead : scoreLead)
         : null;
-      const deltaStr = delta != null && delta !== 0
-        ? ` This move is ${Math.abs(delta)}% worse than KataGo's top choice (${bestMove} at ${bestWr}%).`
+      const studentScoreStr = studentScoreLead != null
+        ? ` You are ${studentScoreLead >= 0 ? '+' : ''}${studentScoreLead.toFixed(1)} pts ${studentScoreLead >= 0 ? 'ahead' : 'behind'}.`
         : '';
 
-      systemPrompt = `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
+      // Principal variation of Goxira's actual move — grounds threat claims without fabrication.
+      const goxiraMoveData = topMoves.find(m => m.move === move) || topMoves[0];
+      const pvStr = goxiraMoveData?.pv?.length
+        ? `KataGo expected follow-up: ${goxiraMoveData.pv.slice(0, 5).join(', ')}`
+        : '';
+
+      systemPrompt = `You are Goxira, an AI Go opponent. You just played a move. Explain directly to the student (second person, "you") what your move does and what they should watch out for.
+
+Focus entirely on the THREAT or OPPORTUNITY your move creates for the student — not on evaluating whether your move was good. Do not rank or praise your own move.
+
 GROUNDING RULES:
-- Reference ONLY moves and evaluations present in the KataGo data provided below.
-- Do NOT invent variations, sequences, or moves not in KataGo's top-5 list.
-- Do NOT estimate or fabricate win rates. Use KataGo's numbers exactly.
-- If the data doesn't cover something, say so honestly. Saying less is always better than fabricating.
+- Ground every claim in the KataGo follow-up sequence provided. If the sequence shows a capturing threat, name it. If it shows territory, say so.
+- Do NOT invent sequences or threats not present in the data.
+- Do NOT fabricate win rates. Use the student's winning chances number exactly if you mention it.
+- If the data doesn't support a claim, say less.
 
-TEACHING CALIBRATION:
-- 25k–15k: Simple language. Focus on what happened tactically. One concept at a time.
-- 15k–5k: Introduce strategic reasoning. Explain why a move was directionally wrong.
-- 5k–1d+: Full strategic discussion. Discuss aji, thickness, direction of play.
+TEACHING CALIBRATION (student is ${rank}):
+- 25k–15k: One plain sentence on the immediate threat. Keep it concrete.
+- 15k–5k: Name the threat and the strategic idea behind the move.
+- 5k–1d+: Explain the strategic implication, timing, and key response area.
 
-Under 100 words. No markdown. Plain conversational language.`;
+Under 80 words. No markdown. No "I think." Speak as Goxira to the student.`;
 
-      userContent = `Student rank: ${rank}. Board: ${boardSize}x${boardSize}. Move #${moveNumber}. ${toPlayWord} played at ${move}.
-KataGo position assessment: ${winPct}% for ${toPlayWord}.${scoreStr}${rankStr}${deltaStr}
-KataGo top-5 candidate moves:
-${topMovesStr || '(no data)'}
-Explain what this move does and how it compares to KataGo's top choices.`;
+      userContent = `Goxira (${toPlayWord}) just played ${move} on move ${moveNumber} of a ${boardSize}×${boardSize} game.
+Student's winning chances: ${studentWinPct}%.${studentScoreStr}
+${pvStr}
+Tell the student what this move does and what to watch out for.`;
     } else {
       // KataGo unavailable — honest fallback with generic thematic commentary only.
       systemPrompt = `You are a Go tutor offering educational commentary on a student's game. The position analysis engine is currently offline, so you cannot evaluate whether this specific move was good or bad.
