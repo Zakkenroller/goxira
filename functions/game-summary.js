@@ -6,7 +6,9 @@ const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 // Fetch per-turn winrate from KataGo. Returns null if unavailable.
 async function katagoAnalyze(sgf, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
-  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 10000));
+  // 18s timeout: full-game analysis (up to ~20 positions × 20 visits each) needs more
+  // time than a single move query. 10s was too tight and caused frequent timeouts.
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 18000));
   try {
     const fetchResult = fetch(`${KATAGO_SERVICE_URL}/analyze`, {
       method: 'POST',
@@ -25,14 +27,10 @@ async function katagoAnalyze(sgf, boardSize) {
 
 // Fetch top 5 candidate moves for a specific position in the game (by SGF up to that move).
 // Used to enrich key moments with concrete alternatives.
-async function katagoAnalyzePosition(sgf, boardSize, turnNumber) {
+async function katagoAnalyzePosition(sgf, boardSize, turnNumber, rank) {
   if (!KATAGO_SERVICE_URL) return null;
   const timeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
   try {
-    // We use /move with a truncated SGF to get the top 5 at that turn.
-    // Determine color to play: odd turns = White (after Black's first move), even turns = Black.
-    // Actually we pass the SGF up to the target turn and let KataGo figure out color from the SGF.
-    // We use /analyze-position with no extra moves to evaluate the position at that point.
     const fetchResult = fetch(`${KATAGO_SERVICE_URL}/move`, {
       method: 'POST',
       headers: {
@@ -41,7 +39,8 @@ async function katagoAnalyzePosition(sgf, boardSize, turnNumber) {
       },
       // Use truncated SGF up to the turn before the key moment so KataGo
       // evaluates what the player should have played at that turn.
-      body: JSON.stringify({ sgf, color: turnNumber % 2 === 0 ? 'B' : 'W', boardSize, rank: '1 dan' }),
+      // Use the player's rank (not '1 dan') to keep visit count proportionate.
+      body: JSON.stringify({ sgf, color: turnNumber % 2 === 0 ? 'B' : 'W', boardSize, rank }),
     }).then(res => res.ok ? res.json() : null).catch(() => null);
     return await Promise.race([fetchResult, timeout]);
   } catch (e) {
@@ -139,7 +138,7 @@ exports.handler = async (event) => {
     // For each key moment, fetch the top 5 alternatives from KataGo.
     const momentDetails = await Promise.all(moments.map(async ({ turn, delta }) => {
       const truncated = truncateSGF(sgf, turn - 1);
-      const analysis = await katagoAnalyzePosition(truncated, boardSize, turn);
+      const analysis = await katagoAnalyzePosition(truncated, boardSize, turn, rank);
       const topMoves = analysis?.analysis?.topMoves || [];
       return {
         turn,

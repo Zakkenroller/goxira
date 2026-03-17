@@ -306,7 +306,7 @@ const server = http.createServer(async (req, res) => {
         boardXSize: boardSize,
         boardYSize: boardSize,
         analyzeTurns,
-        maxVisits: 50, // full-game pass: keep it cheap
+        maxVisits: 20, // full-game pass: 20 visits × ~20 positions fits well within the Netlify timeout
       }, analyzeTurns.length);
 
       // Sort by turnNumber in case engine returns out of order
