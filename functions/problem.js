@@ -17,6 +17,18 @@ function toGoNotation(col, row, boardSize) {
   return GOCOLS[col] + (boardSize - row);
 }
 
+// Deterministic board region from internal coordinates.
+// row=0 is the TOP of the board (Go row boardSize), col=0 is the left edge ('A').
+function boardRegion(col, row, boardSize) {
+  const third = boardSize / 3;
+  const vert  = row < third ? 'upper' : row > 2 * third ? 'lower' : 'middle';
+  const horiz = col < third ? 'left'  : col > 2 * third ? 'right' : 'center';
+  if (horiz === 'center' && vert === 'middle') return 'center of the board';
+  if (horiz === 'center') return `${vert} edge`;
+  if (vert === 'middle')  return `${horiz} side`;
+  return `${vert}-${horiz}`;
+}
+
 async function fetchProblemFromDB(difficulty) {
   const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/tsumego_problems`);
   url.searchParams.set('difficulty', `eq.${difficulty}`);
@@ -134,6 +146,7 @@ async function enrichWithText(problem, rank) {
   const toPlayWord   = to_play === 'B' ? 'Black' : 'White';
   const opponentWord = to_play === 'B' ? 'White' : 'Black';
   const solutionNote = toGoNotation(solution_col, solution_row, board_size);
+  const region       = boardRegion(solution_col, solution_row, board_size);
 
   // Compute verified tactical facts for the solution move
   const facts      = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
@@ -157,10 +170,11 @@ ACCURACY CONTRACT:
 Verified board facts are computed by a deterministic rules engine. They are ground truth.
 - The explanation MUST be grounded in and consistent with the provided facts.
 - Do NOT add tactical claims beyond the facts (no invented liberty counts, alternative moves, or continuations).
-- The hint must guide toward the concept without giving away the coordinate.`,
+- The hint must guide toward the concept without giving away the coordinate.
+- Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.`,
         messages: [{
           role: 'user',
-          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote}. Student rank: ${rank}.\n\n${factsStr}`,
+          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.\n\n${factsStr}`,
         }],
       }),
     });

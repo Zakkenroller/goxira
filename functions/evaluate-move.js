@@ -180,6 +180,25 @@ exports.handler = async (event) => {
     const katagoStones = stonesToKataGo(setupStones, boardSize);
     const katago       = await katagoEval(katagoStones, [toPlay, studentMove], boardSize);
 
+    // If KataGo is unavailable and the correct move is indirect (no captures, no atari),
+    // Claude has no grounding for explaining why it's correct. Return a canned response
+    // rather than risk hallucinated strategic/positional claims.
+    const correctIsIndirect = correctFacts.captured.length === 0 && correctFacts.atari.length === 0;
+    if (!katago && correctIsIndirect && !isCorrect) {
+      const cannedHint = attemptNumber >= 3
+        ? `The correct answer is ${correctMove}. This is a positional or indirect move — without the engine I can't explain why it's better than your choice. The Go engine is temporarily unavailable.`
+        : `That's not the key move here. This problem involves positional judgment rather than an immediate capture or atari — look for a move that changes the overall shape or balance.`;
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          correct: false,
+          message: cannedHint,
+          solution: attemptNumber >= 3 ? problem.solution : null,
+        }),
+      };
+    }
+
     let katagoContext = '';
     let systemPreamble = '';
 
@@ -205,6 +224,7 @@ GROUNDING RULES:
     } else {
       systemPreamble = `You are a Go tutor evaluating a student's tsumego attempt. Be concise (under 80 words) and honest. No markdown.
 KataGo engine data is not available for this position. You may ONLY reference the verified tactical facts below (captures, atari). Do NOT estimate whether this move is strategically good or bad. Do NOT invent win rates or suggest alternative moves. You can describe what the move physically does on the board and nothing more.
+If the verified facts show "no immediate captures or atari" for the correct move, you may only confirm the move is correct and state that its strategic value requires engine data to explain.
 The "Verified tactical facts" section is computed by a deterministic rules engine and is ground truth.`;
     }
 
