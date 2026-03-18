@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Joseki Dictionary — Goxira</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-main { padding-top: 1.25rem; }
+
+    /* ── Category tabs ── */
+    .cat-tabs {
+      display: flex; gap: 0.4rem; margin-bottom: 1rem;
+    }
+    .cat-tab {
+      flex: 1; padding: 0.45rem 0.5rem;
+      font-size: 0.75rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      text-align: center; border-radius: 100px;
+      border: 1.5px solid var(--paper-deep);
+      background: white; color: var(--ink-faint);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .cat-tab.active {
+      background: var(--ink); color: var(--paper);
+      border-color: var(--ink);
+    }
+
+    /* ── Page layout ── */
+    .joseki-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+    @media (min-width: 700px) {
+      .joseki-layout { grid-template-columns: 260px 1fr; }
+    }
+
+    /* ── Pattern list (left panel) ── */
+    .pattern-list {
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .pattern-list-header {
+      font-size: 0.68rem; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--ink-faint);
+      margin-bottom: 0.25rem;
+    }
+    .pattern-card {
+      background: white;
+      border: 1.5px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.75rem 0.875rem;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .pattern-card:hover { background: var(--paper-warm); transform: translateX(2px); }
+    .pattern-card.active {
+      border-color: var(--ink); background: var(--paper-warm);
+    }
+    .pattern-card__name {
+      font-size: 0.875rem; font-weight: 500; color: var(--ink);
+    }
+    .pattern-card__meta {
+      font-size: 0.72rem; color: var(--ink-faint); margin-top: 0.15rem;
+    }
+    .pattern-card__tags {
+      display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem;
+    }
+    .tag-pill {
+      font-size: 0.65rem; padding: 0.1rem 0.45rem;
+      border-radius: 100px; background: var(--paper-deep);
+      color: var(--ink-faint);
+    }
+
+    /* ── Right panel ── */
+    .explorer-panel { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    /* ── Board ── */
+    .board-container {
+      background: var(--board);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    .board-container svg {
+      width: 100% !important; height: auto !important; display: block;
+    }
+    .board-loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--board); z-index: 10;
+    }
+
+    /* ── Navigation row ── */
+    .nav-row {
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .nav-row .btn { padding: 0.4rem 0.8rem; font-size: 0.82rem; }
+    .move-counter {
+      flex: 1; text-align: center;
+      font-size: 0.8rem; color: var(--ink-faint);
+    }
+
+    /* ── Info panel ── */
+    .info-box {
+      background: var(--paper-warm);
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.875rem 1rem;
+    }
+    .info-box__title {
+      font-family: var(--font-serif);
+      font-size: 1rem; font-weight: 600; color: var(--ink);
+      margin-bottom: 0.3rem;
+    }
+    .info-box__desc {
+      font-size: 0.875rem; line-height: 1.6; color: var(--ink-light);
+    }
+    .info-box__result {
+      margin-top: 0.5rem;
+      font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--ink-faint);
+    }
+
+    /* ── Deviation feedback ── */
+    .deviation-box {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--r-md);
+      padding: 0.875rem 1rem;
+      font-size: 0.875rem; line-height: 1.6;
+      color: var(--ink-light);
+      display: none;
+    }
+    .deviation-box.show { display: block; }
+    .deviation-box.error { border-left-color: var(--wrong); }
+
+    .deviation-header {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--accent);
+      margin-bottom: 0.4rem;
+    }
+    .deviation-box.error .deviation-header { color: var(--wrong); }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center; padding: 3rem 1rem;
+      color: var(--ink-faint); font-size: 0.875rem;
+    }
+    .empty-state__icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+
+    /* ── Loading skeleton ── */
+    .skeleton-list {
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .skeleton-card {
+      height: 72px; border-radius: var(--r-md);
+      background: linear-gradient(90deg, var(--paper-deep) 25%, var(--paper-warm) 50%, var(--paper-deep) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top nav -->
+  <nav class="nav">
+    <a href="home.html" class="nav__logo">
+      <span class="nav__logo-stone"></span>
+      Goxira
+    </a>
+    <div class="nav__links">
+      <a href="problems.html" class="nav__link">Problems</a>
+      <a href="play.html"     class="nav__link">Play</a>
+      <a href="joseki.html"   class="nav__link active">Joseki</a>
+      <a href="review.html"   class="nav__link">Review</a>
+      <a href="progress.html" class="nav__link">Progress</a>
+      <a href="profile.html"  class="nav__link">Profile</a>
+    </div>
+  </nav>
+
+  <main class="page-main">
+    <div class="container">
+
+      <!-- Category tabs -->
+      <div class="cat-tabs">
+        <button class="cat-tab active" data-cat="joseki" onclick="selectCategory(this, 'joseki')">
+          Joseki
+        </button>
+        <button class="cat-tab" data-cat="fuseki" onclick="selectCategory(this, 'fuseki')">
+          Fuseki
+        </button>
+      </div>
+
+      <div class="joseki-layout">
+
+        <!-- Pattern list -->
+        <div>
+          <p class="pattern-list-header" id="list-header">Patterns</p>
+          <div class="pattern-list" id="pattern-list">
+            <div class="skeleton-list">
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Explorer panel -->
+        <div class="explorer-panel" id="explorer-panel">
+          <div class="empty-state">
+            <div class="empty-state__icon">囲</div>
+            <p>Select a pattern to explore it step by step.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom nav -->
+  <nav class="bottom-nav">
+    <div class="bottom-nav__item" onclick="location.href='home.html'">
+      <span class="bottom-nav__icon">⊞</span>Home
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='problems.html'">
+      <span class="bottom-nav__icon">🧩</span>Problems
+    </div>
+    <div class="bottom-nav__item active" onclick="location.href='joseki.html'">
+      <span class="bottom-nav__icon">囲</span>Joseki
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='play.html'">
+      <span class="bottom-nav__icon">⚫</span>Play
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='review.html'">
+      <span class="bottom-nav__icon">🔍</span>Review
+    </div>
+  </nav>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+  <script>
+    window.GOTUTOR_CONFIG = {
+      supabaseUrl:     'https://humvrkmlvhzwoawoyslu.supabase.co',
+      supabaseAnonKey: 'sb_publishable_dEQVVToEQh35MPrBEtKkmQ_om0ty8-r',
+    };
+  </script>
+  <script src="supabase-client.js"></script>
+  <script src="api.js"></script>
+  <script src="board.js"></script>
+  <script src="glossary.js"></script>
+  <script>
+    const BOARD_SIZE = 19;
+
+    let currentCategory  = 'joseki';
+    let currentPattern   = null;
+    let currentMoveIndex = 0;  // how far through the pattern's moves we are
+    let board            = null;
+    let userId           = null;
+    let userRank         = '20 kyu';
+
+    // ── Init ────────────────────────────────────────────────────────
+    async function init() {
+      const session = await Auth.getSession();
+      if (!session) { location.href = 'auth.html'; return; }
+      userId = session.user.id;
+      const profile = await UserDB.getProfile(userId);
+      if (profile) userRank = profile.current_rank;
+      await loadPatternList('joseki');
+    }
+
+    // ── Category selection ───────────────────────────────────────────
+    async function selectCategory(btn, cat) {
+      currentCategory = cat;
+      document.querySelectorAll('.cat-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      clearExplorer();
+      await loadPatternList(cat);
+    }
+
+    // ── Load pattern list ────────────────────────────────────────────
+    async function loadPatternList(category) {
+      const listEl = document.getElementById('pattern-list');
+      document.getElementById('list-header').textContent =
+        category === 'joseki' ? 'Corner Patterns' : 'Opening Lines';
+      listEl.innerHTML = `
+        <div class="skeleton-list">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>`;
+
+      try {
+        const { patterns } = await API.josekiLookup(null, category);
+
+        if (!patterns.length) {
+          listEl.innerHTML = `
+            <div class="empty-state" style="padding:1.5rem 0">
+              <p>No ${category} patterns loaded yet.</p>
+              <p style="margin-top:0.5rem;font-size:0.78rem">
+                Import from Kogo's Joseki Dictionary or OGS to populate this library.
+              </p>
+            </div>`;
+          return;
+        }
+
+        listEl.innerHTML = '';
+        patterns.forEach(p => {
+          const card = document.createElement('div');
+          card.className = 'pattern-card';
+          const diffLabel = ['', 'Beginner', 'Intermediate', 'Advanced'][p.difficulty] || '';
+          const tags = (p.tags || []).map(t =>
+            `<span class="tag-pill">${escHtml(t)}</span>`
+          ).join('');
+          card.innerHTML = `
+            <p class="pattern-card__name">${escHtml(p.name)}</p>
+            <p class="pattern-card__meta">${diffLabel}${p.result ? ' · ' + escHtml(p.result) : ''}</p>
+            ${tags ? `<div class="pattern-card__tags">${tags}</div>` : ''}
+          `;
+          card.onclick = () => openPattern(p, card);
+          listEl.appendChild(card);
+        });
+
+      } catch(e) {
+        listEl.innerHTML = `<p style="font-size:0.82rem;color:var(--ink-faint)">Failed to load patterns: ${escHtml(e.message)}</p>`;
+      }
+    }
+
+    // ── Open a pattern ───────────────────────────────────────────────
+    function openPattern(pattern, cardEl) {
+      // Mark active card
+      document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('active'));
+      if (cardEl) cardEl.classList.add('active');
+
+      currentPattern   = pattern;
+      currentMoveIndex = 0;
+      renderExplorer(pattern);
+    }
+
+    function renderExplorer(pattern) {
+      const panel = document.getElementById('explorer-panel');
+      panel.innerHTML = `
+        <div class="board-container" id="board-container">
+          <div class="board-loading" id="board-loading">
+            <span class="loader" style="width:32px;height:32px;border-width:3px;color:var(--board-dark)"></span>
+          </div>
+        </div>
+
+        <div class="nav-row">
+          <button class="btn btn--secondary" id="prev-btn" onclick="stepMove(-1)" disabled>← Prev</button>
+          <span class="move-counter" id="move-counter">Move 0 / ${(pattern.moves || []).length}</span>
+          <button class="btn btn--secondary" id="next-btn" onclick="stepMove(1)">Next →</button>
+        </div>
+
+        <div class="info-box" id="info-box">
+          <p class="info-box__title">${escHtml(pattern.name)}</p>
+          <p class="info-box__desc" id="info-desc">${escHtml(pattern.description || 'Navigate through the moves to explore this pattern.')}</p>
+          ${pattern.result ? `<p class="info-box__result">Result: ${escHtml(pattern.result)}</p>` : ''}
+        </div>
+
+        <div class="deviation-box" id="deviation-box">
+          <p class="deviation-header" id="deviation-header">Deviation</p>
+          <div id="deviation-text"></div>
+        </div>
+      `;
+
+      // Init board
+      const container = document.getElementById('board-container');
+      board = Board.create(container, BOARD_SIZE, onUserMove);
+      board.setColor('B');
+      document.getElementById('board-loading').style.display = 'none';
+
+      // Render up to currentMoveIndex
+      refreshBoardState();
+    }
+
+    function clearExplorer() {
+      currentPattern   = null;
+      currentMoveIndex = 0;
+      board            = null;
+      document.getElementById('explorer-panel').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state__icon">囲</div>
+          <p>Select a pattern to explore it step by step.</p>
+        </div>`;
+    }
+
+    // ── Step through moves ────────────────────────────────────────────
+    function stepMove(delta) {
+      if (!currentPattern) return;
+      const moves = currentPattern.moves || [];
+      const newIdx = Math.max(0, Math.min(moves.length, currentMoveIndex + delta));
+      if (newIdx === currentMoveIndex) return;
+      currentMoveIndex = newIdx;
+      refreshBoardState();
+      // Hide any deviation box on navigation
+      hideDeviation();
+    }
+
+    function refreshBoardState() {
+      if (!board || !currentPattern) return;
+      const moves = currentPattern.moves || [];
+
+      // Full replay from scratch (simple, correct)
+      board.reset();
+      for (let i = 0; i < currentMoveIndex; i++) {
+        const m = moves[i];
+        board.setColor(m.color);
+        board.placeSetup(m.x, m.y, m.color);
+      }
+
+      // Set board color for the next expected move
+      if (currentMoveIndex < moves.length) {
+        board.setColor(moves[currentMoveIndex].color);
+        board.setInteractive(true);
+      } else {
+        board.setInteractive(false);
+      }
+
+      updateNav();
+    }
+
+    function updateNav() {
+      const moves = currentPattern?.moves || [];
+      const prevBtn = document.getElementById('prev-btn');
+      const nextBtn = document.getElementById('next-btn');
+      const counter = document.getElementById('move-counter');
+      if (prevBtn) prevBtn.disabled = currentMoveIndex === 0;
+      if (nextBtn) nextBtn.disabled = currentMoveIndex >= moves.length;
+      if (counter) counter.textContent = `Move ${currentMoveIndex} / ${moves.length}`;
+    }
+
+    // ── Handle user-played move (deviation detection) ─────────────────
+    async function onUserMove(col, row) {
+      if (!currentPattern) return;
+      const moves = currentPattern.moves || [];
+      if (currentMoveIndex >= moves.length) return;
+
+      const expected = moves[currentMoveIndex];
+      const isCorrect = (col === expected.x && row === expected.y);
+
+      if (isCorrect) {
+        // Advance
+        currentMoveIndex++;
+        refreshBoardState();
+        hideDeviation();
+      } else {
+        // Deviation — query KataGo + Claude for explanation
+        board.setInteractive(false);
+        showDeviationLoading();
+
+        const moveSeq = (currentPattern.moves || []).slice(0, currentMoveIndex).map(m => ({
+          color: m.color, col: m.x, row: m.y,
+        }));
+        const deviationMove = { color: expected.color, col, row };
+
+        try {
+          const res = await API.josekiDeviation(moveSeq, deviationMove, BOARD_SIZE, userRank);
+          showDeviation(res.explanation, res.pointLoss, false);
+        } catch(e) {
+          showDeviation('Could not retrieve engine analysis for this deviation.', null, true);
+        }
+
+        // Undo the wrong move visually and re-enable
+        board.setInteractive(true);
+      }
+    }
+
+    // ── Deviation UI ─────────────────────────────────────────────────
+    function showDeviationLoading() {
+      const box = document.getElementById('deviation-box');
+      if (!box) return;
+      document.getElementById('deviation-header').textContent = 'Analysing deviation…';
+      document.getElementById('deviation-text').textContent = '';
+      box.className = 'deviation-box show';
+    }
+
+    function showDeviation(text, pointLoss, isError) {
+      const box = document.getElementById('deviation-box');
+      if (!box) return;
+      const header = document.getElementById('deviation-header');
+      const textEl = document.getElementById('deviation-text');
+      header.textContent = isError
+        ? 'Engine unavailable'
+        : (pointLoss != null ? `Off-joseki — ~${Math.abs(pointLoss).toFixed(1)} pt loss` : 'Off-joseki');
+      textEl.textContent = text;
+      Glossary.wrap(textEl);
+      box.className = `deviation-box show${isError ? ' error' : ''}`;
+    }
+
+    function hideDeviation() {
+      const box = document.getElementById('deviation-box');
+      if (box) box.className = 'deviation-box';
+    }
+
+    // ── Utilities ────────────────────────────────────────────────────
+    function escHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    init();
+  </script>
+</body>
+</html>

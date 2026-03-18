@@ -168,6 +168,26 @@
       to   { opacity: 1; transform: translateY(0); }
     }
 
+    /* ── Category tabs ── */
+    .category-tabs {
+      display: flex; gap: 0.4rem;
+      margin-bottom: 0.75rem;
+      animation: fadeUp 0.3s ease both;
+    }
+    .category-tab {
+      flex: 1; padding: 0.4rem 0.5rem;
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase; text-align: center;
+      border: 1.5px solid var(--paper-deep);
+      border-radius: 100px;
+      background: white; color: var(--ink-faint);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .category-tab.active {
+      background: var(--ink); color: var(--paper);
+      border-color: var(--ink);
+    }
+
     /* ── Bottom nav ── */
     .bottom-nav { display: flex; }
 
@@ -262,6 +282,14 @@
         <div id="rank-change-wrap"></div>
       </div>
 
+      <!-- Category filter -->
+      <div class="category-tabs">
+        <button class="category-tab active" data-cat="" onclick="selectCategory(this, '')">All</button>
+        <button class="category-tab" data-cat="life_death" onclick="selectCategory(this, 'life_death')">Life &amp; Death</button>
+        <button class="category-tab" data-cat="tesuji"     onclick="selectCategory(this, 'tesuji')">Tesuji</button>
+        <button class="category-tab" data-cat="shape"      onclick="selectCategory(this, 'shape')">Shape</button>
+      </div>
+
       <!-- Problem header -->
       <div class="problem-header">
         <div class="problem-meta">
@@ -347,18 +375,29 @@
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script src="board.js"></script>
+  <script src="glossary.js"></script>
   <script>
-    let currentProblem = null;
-    let board          = null;
-    let attemptNumber  = 0;
-    let hintsUsed      = 0;
-    let solved         = false;
-    let isMoving       = false;
-    let userId         = null;
-    let userProfile    = null;
-    let totalSolved    = 0;
+    let currentProblem    = null;
+    let board             = null;
+    let attemptNumber     = 0;
+    let hintsUsed         = 0;
+    let solved            = false;
+    let isMoving          = false;
+    let userId            = null;
+    let userProfile       = null;
+    let totalSolved       = 0;
+    let selectedCategory  = '';   // '' = all, 'life_death', 'tesuji', 'shape'
     let prefetchedProblem = null;  // next problem preloaded in background
     let prefetchPromise   = null;  // in-flight prefetch Promise
+
+    function selectCategory(btn, cat) {
+      selectedCategory = cat;
+      document.querySelectorAll('.category-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      prefetchedProblem = null;
+      prefetchPromise   = null;
+      loadNewProblem();
+    }
 
 
     // ── Init ────────────────────────────────────────────────────
@@ -393,7 +432,9 @@
     function schedulePrefetch() {
       if (!userProfile) return;
       prefetchedProblem = null;
-      prefetchPromise = API.generateProblem(userProfile.current_rank, null, 9)
+      prefetchPromise = API.generateProblem(
+          userProfile.current_rank, null, 9, selectedCategory || null, userId
+        )
         .then(res => { prefetchedProblem = res.problem; return res.problem; })
         .catch(() => null);
     }
@@ -435,7 +476,9 @@
           prefetchPromise   = null;
         } else {
           // First load (no prefetch yet) or prefetch failed — fetch directly.
-          const res = await API.generateProblem(userProfile.current_rank, null, 9);
+          const res = await API.generateProblem(
+            userProfile.current_rank, null, 9, selectedCategory || null, userId
+          );
           problem = res.problem;
         }
 
@@ -595,10 +638,14 @@
 
       const points = Rank.pointsForProblem(true, hintsUsed, currentProblem.difficulty || 1);
       await updateRankScore(points);
-      await UserDB.logAttempt(
-        userId, currentProblem.id, currentProblem.boardSize || 19,
-        currentProblem.topic, true, hintsUsed
-      );
+      await Promise.all([
+        UserDB.logAttempt(
+          userId, currentProblem.id, currentProblem.boardSize || 19,
+          currentProblem.topic, true, hintsUsed
+        ),
+        API.updateSchedule(userId, currentProblem.id, true, hintsUsed, attemptNumber)
+          .catch(() => {}), // schedule update is best-effort
+      ]);
     }
 
     async function onFailed() {
@@ -609,10 +656,14 @@
 
       const points = Rank.pointsForProblem(false, 0, currentProblem.difficulty || 1);
       await updateRankScore(points);
-      await UserDB.logAttempt(
-        userId, currentProblem.id, currentProblem.boardSize || 19,
-        currentProblem.topic, false, hintsUsed
-      );
+      await Promise.all([
+        UserDB.logAttempt(
+          userId, currentProblem.id, currentProblem.boardSize || 19,
+          currentProblem.topic, false, hintsUsed
+        ),
+        API.updateSchedule(userId, currentProblem.id, false, hintsUsed, attemptNumber)
+          .catch(() => {}), // schedule update is best-effort
+      ]);
     }
 
     async function updateRankScore(points) {
@@ -640,6 +691,7 @@
       const box = document.getElementById('commentary');
       box.textContent = text;
       box.className   = `commentary-box show${type ? ' ' + type : ''}`;
+      Glossary.wrap(box);
       // Smoothly bring the result into view — critical on small phones where
       // the board fills much of the screen.
       box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
