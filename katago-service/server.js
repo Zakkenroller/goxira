@@ -199,6 +199,22 @@ function komi(boardSize) {
   return boardSize === 19 ? 7.5 : boardSize === 13 ? 6.5 : 5.5;
 }
 
+// Parse KataGo's flat ownership array into a GTP-keyed map.
+// ownershipFlat: row-major array of length boardSize*boardSize.
+// Values: +1.0 = Black owns, -1.0 = White owns (from Black's perspective).
+// Row 0 in the flat array = top row of board = GTP row boardSize.
+function parseOwnershipMap(ownershipFlat, boardSize) {
+  if (!Array.isArray(ownershipFlat) || ownershipFlat.length !== boardSize * boardSize) return null;
+  const map = {};
+  for (let row = 0; row < boardSize; row++) {
+    for (let col = 0; col < boardSize; col++) {
+      const gtp = COLS[col] + (boardSize - row);
+      map[gtp] = ownershipFlat[row * boardSize + col];
+    }
+  }
+  return map;
+}
+
 // ---------- HTTP plumbing ----------
 
 function respond(res, status, body) {
@@ -389,6 +405,7 @@ const server = http.createServer(async (req, res) => {
         boardYSize:    boardSize,
         analyzeTurns:  [movesArr.length],
         maxVisits:     100,
+        includeOwnership: true,
       });
 
       const topMoves = (result.moveInfos || []).slice(0, 5).map(m => ({
@@ -399,11 +416,13 @@ const server = http.createServer(async (req, res) => {
         pv: (m.pv || []).slice(0, 5),
       }));
       const best = topMoves[0];
+      const ownershipMap = parseOwnershipMap(result.ownership, boardSize);
       return respond(res, 200, {
-        winrate:   result.rootInfo?.winrate   ?? null,
-        scoreLead: result.rootInfo?.scoreLead ?? null,
-        bestMove:  best?.move ?? null,
+        winrate:      result.rootInfo?.winrate   ?? null,
+        scoreLead:    result.rootInfo?.scoreLead ?? null,
+        bestMove:     best?.move ?? null,
         topMoves,
+        ownershipMap,
       });
     } catch (e) {
       console.error('/analyze-position error:', e.message);
