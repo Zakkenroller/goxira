@@ -84,30 +84,45 @@ async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
     }
   }
 
-  // Default: random problem by difficulty (and optional category)
-  const url = new URL(`${base}/rest/v1/tsumego_problems`);
-  url.searchParams.set('difficulty', `eq.${difficulty}`);
-  if (category) url.searchParams.set('category', `eq.${category}`);
-  url.searchParams.set('select', 'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row,category');
-  url.searchParams.set('limit',  '1');
-  const offset = Math.floor(Math.random() * 300);
-  url.searchParams.set('offset', String(offset));
-
+  // Helper: fetch with a given offset, returns rows array (may be empty).
   const dbHeaders = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` };
-  const res = await fetch(url.toString(), { headers: dbHeaders });
-
-  if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
-  let rows = await res.json();
-
-  // If the random offset overshot the available rows for this category/difficulty,
-  // retry from the beginning so smaller categories (tesuji, shape) always return a result.
-  if (!rows.length && offset > 0) {
-    url.searchParams.set('offset', '0');
-    const res2 = await fetch(url.toString(), { headers: dbHeaders });
-    if (res2.ok) rows = await res2.json();
+  async function tryFetch(extraParams = {}) {
+    const url = new URL(`${base}/rest/v1/tsumego_problems`);
+    url.searchParams.set('difficulty', `eq.${difficulty}`);
+    if (category) url.searchParams.set('category', `eq.${category}`);
+    url.searchParams.set('select', 'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row,category');
+    url.searchParams.set('limit', '1');
+    for (const [k, v] of Object.entries(extraParams)) url.searchParams.set(k, v);
+    const r = await fetch(url.toString(), { headers: dbHeaders });
+    if (!r.ok) return null; // signal error (e.g. column doesn't exist)
+    return r.json();
   }
 
-  if (!rows.length) throw new Error('No problems found for difficulty ' + difficulty);
+  const offset = Math.floor(Math.random() * 300);
+  let rows = await tryFetch({ offset: String(offset) });
+
+  // Supabase returned an error (e.g. the category column doesn't exist yet) — drop the
+  // category filter and re-query without it so the page at least serves problems.
+  if (rows === null && category) {
+    category = null;
+    rows = await tryFetch({ offset: String(offset) });
+    if (rows === null) throw new Error('Supabase error fetching problems');
+  }
+
+  // Random offset overshot the available rows — retry from offset 0.
+  if (rows !== null && !rows.length && offset > 0) {
+    rows = await tryFetch({ offset: '0' });
+  }
+
+  // Category filter returned zero problems (e.g. all problems are still tagged life_death).
+  // Fall back to all categories so the user at least gets a problem.
+  if (!rows.length && category) {
+    category = null;
+    rows = await tryFetch({ offset: String(Math.floor(Math.random() * 300)) });
+    if (!rows.length) rows = await tryFetch({ offset: '0' });
+  }
+
+  if (!rows || !rows.length) throw new Error('No problems found for difficulty ' + difficulty);
   return rows[0];
 }
 
