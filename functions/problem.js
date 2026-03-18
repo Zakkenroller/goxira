@@ -93,15 +93,20 @@ async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
   const offset = Math.floor(Math.random() * 300);
   url.searchParams.set('offset', String(offset));
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      'apikey':        anonKey,
-      'Authorization': `Bearer ${anonKey}`,
-    },
-  });
+  const dbHeaders = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` };
+  const res = await fetch(url.toString(), { headers: dbHeaders });
 
   if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
-  const rows = await res.json();
+  let rows = await res.json();
+
+  // If the random offset overshot the available rows for this category/difficulty,
+  // retry from the beginning so smaller categories (tesuji, shape) always return a result.
+  if (!rows.length && offset > 0) {
+    url.searchParams.set('offset', '0');
+    const res2 = await fetch(url.toString(), { headers: dbHeaders });
+    if (res2.ok) rows = await res2.json();
+  }
+
   if (!rows.length) throw new Error('No problems found for difficulty ' + difficulty);
   return rows[0];
 }

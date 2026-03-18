@@ -144,6 +144,12 @@
     }
     .deviation-box.error .deviation-header { color: var(--wrong); }
 
+    /* ── Category definition ── */
+    .cat-def {
+      font-size: 0.8rem; color: var(--ink-faint); line-height: 1.5;
+      margin-bottom: 0.75rem;
+    }
+
     /* ── Empty state ── */
     .empty-state {
       text-align: center; padding: 3rem 1rem;
@@ -197,6 +203,7 @@
           Fuseki
         </button>
       </div>
+      <p class="cat-def" id="cat-def"></p>
 
       <div class="joseki-layout">
 
@@ -265,6 +272,16 @@
     let userId           = null;
     let userRank         = '20 kyu';
 
+    const CAT_DEFS = {
+      joseki: 'Joseki: established corner sequences considered locally fair for both sides. Learning joseki helps you play efficient, sound moves in the corner.',
+      fuseki:  'Fuseki: the opening phase of a 19×19 game, before contact fighting begins. Strategy focuses on balance between territory, influence, and direction of play.',
+    };
+
+    function setCatDef(cat) {
+      const el = document.getElementById('cat-def');
+      if (el) el.textContent = CAT_DEFS[cat] || '';
+    }
+
     // ── Init ────────────────────────────────────────────────────────
     async function init() {
       const session = await Auth.getSession();
@@ -272,6 +289,7 @@
       userId = session.user.id;
       const profile = await UserDB.getProfile(userId);
       if (profile) userRank = profile.current_rank;
+      setCatDef('joseki');
       await loadPatternList('joseki');
     }
 
@@ -280,6 +298,7 @@
       currentCategory = cat;
       document.querySelectorAll('.cat-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      setCatDef(cat);
       clearExplorer();
       await loadPatternList(cat);
     }
@@ -302,9 +321,9 @@
         if (!patterns.length) {
           listEl.innerHTML = `
             <div class="empty-state" style="padding:1.5rem 0">
-              <p>No ${category} patterns loaded yet.</p>
+              <p>No ${category === 'joseki' ? 'joseki' : 'fuseki'} patterns are available yet.</p>
               <p style="margin-top:0.5rem;font-size:0.78rem">
-                Import from Kogo's Joseki Dictionary or OGS to populate this library.
+                Check back soon — patterns are being added to the library.
               </p>
             </div>`;
           return;
