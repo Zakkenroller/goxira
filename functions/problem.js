@@ -267,7 +267,7 @@ function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
     const group = getGroup(stones, c, r);
     for (const k of group) visited.add(k);
     const libs = getLiberties(stones, group, boardSize);
-    if (libs.size > 4) continue;
+    if (libs.size > 6) continue; // match computePremoveContext threshold
 
     if (color === opponent && libs.has(solutionKey)) return 'attack';
     if (color === toPlay) {

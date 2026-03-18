@@ -162,7 +162,7 @@ function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
     const group = getGroup(stones, c, r);
     for (const k of group) visited.add(k);
     const libs = getLiberties(stones, group, boardSize);
-    if (libs.size > 4) continue;
+    if (libs.size > 6) continue; // match computePremoveContext threshold
 
     if (color === opponent && libs.has(solutionKey)) return 'attack';
     if (color === toPlay) {
@@ -288,7 +288,9 @@ exports.handler = async (event) => {
 This is a closed local problem about group survival. Commentary rules:
 - Use life/death vocabulary exclusively: eye space, two eyes, false eye, vital point, ko, seki, miai, liberties.
 - Explain the move in terms of how it creates or prevents eyes, or how it reduces/expands the group's liberty count.
-- NEVER use territory, fuseki, invasion, or large-scale strategic language. This is a local life/death fight.`
+- NEVER use territory, fuseki, invasion, or large-scale strategic language. This is a local life/death fight.
+- Say "point" or "intersection" — NEVER "square". Go is played on intersections.
+- Say "stone" — NEVER "piece".`
       : problemTopic === 'tesuji'
       ? `PROBLEM TYPE: TESUJI
 Focus on the specific technique demonstrated (ladder, snapback, squeeze, etc.). Name the tesuji.`
@@ -345,7 +347,7 @@ RESPONSE STYLE (be concise, under 80 words):
 Attempt 1 wrong → Socratic hint toward the key tactical concept. Do not reveal the answer coordinate.
 Attempt 2 wrong → More direct hint using the verified facts about the correct move.
 Attempt 3+ wrong → State the correct answer and explain it using only the verified facts.
-Correct → Confirm using the verified facts for why the move works.`,
+Correct → If verified facts show captures or atari: state them precisely and explain what they mean for the group's survival. If verified facts show no captures or atari: state the move is correct and that it occupies the vital point. STOP THERE. Do NOT add speculative claims about what the opponent "might" do, "options", "ability", or probabilistic outcomes. When the data is indirect, say less — do not pad with inferences you cannot verify.`,
         messages: [{
           role: 'user',
           content: `Problem type: ${problemTopic}. Problem: ${problem.description}
