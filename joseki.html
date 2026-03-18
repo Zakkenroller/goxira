@@ -264,6 +264,8 @@
   <script src="glossary.js"></script>
   <script>
     const BOARD_SIZE = 19;
+    // Go column labels A–T, skipping I (standard notation)
+    const COL_LABELS = 'ABCDEFGHJKLMNOPQRST';
 
     let currentCategory  = 'joseki';
     let currentPattern   = null;
@@ -271,6 +273,7 @@
     let board            = null;
     let userId           = null;
     let userRank         = '20 kyu';
+    let practiceMode     = false;  // true = board interactive (quiz mode)
 
     const CAT_DEFS = {
       joseki: 'Joseki: established corner sequences considered locally fair for both sides. Learning joseki helps you play efficient, sound moves in the corner.',
@@ -353,12 +356,12 @@
 
     // ── Open a pattern ───────────────────────────────────────────────
     function openPattern(pattern, cardEl) {
-      // Mark active card
       document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('active'));
       if (cardEl) cardEl.classList.add('active');
 
       currentPattern   = pattern;
       currentMoveIndex = 0;
+      practiceMode     = false;
       renderExplorer(pattern);
     }
 
@@ -375,7 +378,11 @@
           <button class="btn btn--secondary" id="prev-btn" onclick="stepMove(-1)" disabled>← Prev</button>
           <span class="move-counter" id="move-counter">Move 0 / ${(pattern.moves || []).length}</span>
           <button class="btn btn--secondary" id="next-btn" onclick="stepMove(1)">Next →</button>
+          <button class="btn btn--secondary" id="practice-btn" onclick="togglePractice()" style="margin-left:0.25rem">Practice</button>
         </div>
+        <p id="step-hint" style="font-size:0.78rem;color:var(--ink-faint);text-align:center;margin-top:-0.25rem">
+          Use Next → to step through the sequence.
+        </p>
 
         <div class="info-box" id="info-box">
           <p class="info-box__title">${escHtml(pattern.name)}</p>
@@ -392,16 +399,27 @@
       // Init board
       const container = document.getElementById('board-container');
       board = Board.create(container, BOARD_SIZE, onUserMove);
-      board.setColor('B');
       document.getElementById('board-loading').style.display = 'none';
 
-      // Render up to currentMoveIndex
       refreshBoardState();
+    }
+
+    // ── Practice mode toggle ─────────────────────────────────────────
+    function togglePractice() {
+      if (!currentPattern) return;
+      practiceMode = !practiceMode;
+      hideDeviation();
+      refreshBoardState();
+      const hint = document.getElementById('step-hint');
+      if (hint) hint.textContent = practiceMode
+        ? 'Click the board to play the next move in the sequence.'
+        : 'Use Next → to step through the sequence.';
     }
 
     function clearExplorer() {
       currentPattern   = null;
       currentMoveIndex = 0;
+      practiceMode     = false;
       board            = null;
       document.getElementById('explorer-panel').innerHTML = `
         <div class="empty-state">
@@ -426,20 +444,19 @@
       if (!board || !currentPattern) return;
       const moves = currentPattern.moves || [];
 
-      // Full replay from scratch (simple, correct)
-      board.reset();
+      // Full replay from scratch
+      board.clear();  // board.reset() does not exist — use clear()
       for (let i = 0; i < currentMoveIndex; i++) {
         const m = moves[i];
         board.setColor(m.color);
         board.placeSetup(m.x, m.y, m.color);
       }
 
-      // Set board color for the next expected move
-      if (currentMoveIndex < moves.length) {
+      // Board is interactive only in practice mode when moves remain
+      const hasMoves = currentMoveIndex < moves.length;
+      board.setInteractive(practiceMode && hasMoves);
+      if (practiceMode && hasMoves) {
         board.setColor(moves[currentMoveIndex].color);
-        board.setInteractive(true);
-      } else {
-        board.setInteractive(false);
       }
 
       updateNav();
@@ -447,46 +464,58 @@
 
     function updateNav() {
       const moves = currentPattern?.moves || [];
-      const prevBtn = document.getElementById('prev-btn');
-      const nextBtn = document.getElementById('next-btn');
-      const counter = document.getElementById('move-counter');
-      if (prevBtn) prevBtn.disabled = currentMoveIndex === 0;
-      if (nextBtn) nextBtn.disabled = currentMoveIndex >= moves.length;
-      if (counter) counter.textContent = `Move ${currentMoveIndex} / ${moves.length}`;
+      const prevBtn     = document.getElementById('prev-btn');
+      const nextBtn     = document.getElementById('next-btn');
+      const practiceBtn = document.getElementById('practice-btn');
+      const counter     = document.getElementById('move-counter');
+      if (prevBtn)     prevBtn.disabled     = currentMoveIndex === 0;
+      if (nextBtn)     nextBtn.disabled     = currentMoveIndex >= moves.length;
+      if (practiceBtn) practiceBtn.textContent = practiceMode ? 'Stop Practice' : 'Practice';
+      if (counter) {
+        const hasMoves = currentMoveIndex < moves.length;
+        const turnLabel = (practiceMode && hasMoves)
+          ? ` — ${moves[currentMoveIndex].color === 'B' ? 'Black' : 'White'} to play`
+          : '';
+        counter.textContent = `Move ${currentMoveIndex} / ${moves.length}${turnLabel}`;
+      }
     }
 
-    // ── Handle user-played move (deviation detection) ─────────────────
+    // ── Handle user-played move (practice mode only) ──────────────────
     async function onUserMove(col, row) {
-      if (!currentPattern) return;
+      if (!currentPattern || !practiceMode) return;
       const moves = currentPattern.moves || [];
       if (currentMoveIndex >= moves.length) return;
 
-      const expected = moves[currentMoveIndex];
+      const expected  = moves[currentMoveIndex];
       const isCorrect = (col === expected.x && row === expected.y);
 
       if (isCorrect) {
-        // Advance
         currentMoveIndex++;
         refreshBoardState();
         hideDeviation();
       } else {
-        // Deviation — query KataGo + Claude for explanation
+        // Immediately undo the wrong stone and mark the correct position
+        refreshBoardState();
+        board.addMarker(expected.x, expected.y, 'triangle');
         board.setInteractive(false);
+
+        const colLabel  = COL_LABELS[expected.x] ?? expected.x;
+        const rowLabel  = 19 - expected.y;
+        const basicText = `The joseki move is ${colLabel}${rowLabel} (marked with a triangle). ` +
+          `Try again — use ← Prev then Next → to replay the sequence if needed.`;
+
         showDeviationLoading();
 
-        const moveSeq = (currentPattern.moves || []).slice(0, currentMoveIndex).map(m => ({
-          color: m.color, col: m.x, row: m.y,
-        }));
-        const deviationMove = { color: expected.color, col, row };
-
         try {
+          const moveSeq      = moves.slice(0, currentMoveIndex).map(m => ({ color: m.color, col: m.x, row: m.y }));
+          const deviationMove = { color: expected.color, col, row };
           const res = await API.josekiDeviation(moveSeq, deviationMove, BOARD_SIZE, userRank);
           showDeviation(res.explanation, res.pointLoss, false);
         } catch(e) {
-          showDeviation('Could not retrieve engine analysis for this deviation.', null, true);
+          // Engine unavailable — still give useful feedback without an error heading
+          showDeviation(basicText, null, false);
         }
 
-        // Undo the wrong move visually and re-enable
         board.setInteractive(true);
       }
     }
@@ -495,8 +524,8 @@
     function showDeviationLoading() {
       const box = document.getElementById('deviation-box');
       if (!box) return;
-      document.getElementById('deviation-header').textContent = 'Analysing deviation…';
-      document.getElementById('deviation-text').textContent = '';
+      document.getElementById('deviation-header').textContent = 'Off-joseki';
+      document.getElementById('deviation-text').textContent = 'Checking…';
       box.className = 'deviation-box show';
     }
 
