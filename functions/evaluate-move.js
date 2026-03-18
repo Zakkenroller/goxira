@@ -197,6 +197,41 @@ async function katagoEval(initialStones, playerMove, boardSize) {
   }
 }
 
+// Format KataGo ownership map into explicit territory facts for the Claude prompt.
+// Focuses on intersections occupied by problem stones and their immediate neighbors,
+// since those are what life/death commentary is actually about.
+// ownershipMap: { "D5": 0.94, "E5": -0.87, ... } (positive = Black, negative = White)
+// setupStones: { "col,row": "B"|"W" }
+function formatOwnershipFacts(ownershipMap, setupStones, boardSize) {
+  if (!ownershipMap || !setupStones) return '';
+
+  // Collect GTP positions of all problem stones and their adjacent intersections.
+  const relevant = new Set();
+  for (const key of Object.keys(setupStones)) {
+    const [c, r] = key.split(',').map(Number);
+    const gtp = GOCOLS[c] + (boardSize - r);
+    relevant.add(gtp);
+    for (const [nc, nr] of [[c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]]) {
+      if (nc >= 0 && nc < boardSize && nr >= 0 && nr < boardSize) {
+        relevant.add(GOCOLS[nc] + (boardSize - nr));
+      }
+    }
+  }
+
+  const THRESHOLD = 0.7; // |value| > 0.7 = clearly owned
+  const facts = [];
+  for (const gtp of [...relevant].sort()) {
+    const value = ownershipMap[gtp];
+    if (value === undefined || Math.abs(value) < THRESHOLD) continue;
+    const owner = value > 0 ? 'Black' : 'White';
+    const pct = Math.round(Math.abs(value) * 100);
+    facts.push(`${gtp}: ${owner} (${pct}%)`);
+  }
+
+  if (!facts.length) return '';
+  return `KataGo territory ownership after move (>70% = clearly owned; positive = Black, negative = White):\n${facts.join(', ')}`;
+}
+
 function formatTopMoves(topMoves, studentMove, toPlayWord) {
   if (!topMoves?.length) return '';
   const lines = topMoves.map((m, i) => {
@@ -306,7 +341,8 @@ Focus on the specific technique demonstrated (ladder, snapback, squeeze, etc.). 
       const studentRank = katago.topMoves?.findIndex(m => m.move === studentMove) ?? -1;
       const rankStr = studentRank >= 0 ? ` Student's move ranks #${studentRank + 1} of KataGo's top 5.` : '';
 
-      katagoContext = `\nKataGo evaluation after student's move: ${winPct}% for ${toPlayWord}${scoreStr}.${rankStr}\n${topMovesStr}`;
+      const ownershipFacts = formatOwnershipFacts(katago.ownershipMap, setupStones, boardSize);
+      katagoContext = `\nKataGo evaluation after student's move: ${winPct}% for ${toPlayWord}${scoreStr}.${rankStr}\n${topMovesStr}${ownershipFacts ? `\n${ownershipFacts}` : ''}`;
 
       systemPreamble = `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
 GROUNDING RULES:
@@ -314,6 +350,7 @@ GROUNDING RULES:
 - Do NOT invent variations, sequences, or moves not in KataGo's top-5 list.
 - Do NOT estimate or fabricate win rates. Use KataGo's numbers exactly.
 - The "Verified tactical facts" section is computed by a deterministic rules engine (captures, atari, liberties). These are ground truth. Use them.
+- The "KataGo territory ownership" section provides pre-computed ownership per intersection. Use it to ground life/death claims: a stone with >70% ownership by the opponent's color is expected to be dead or captured. Do NOT claim a group is alive or dead unless the ownership data supports it.
 - If the data doesn't cover something, say so honestly. Saying less is always better than fabricating.
 
 ${problemTypeSection}`;
