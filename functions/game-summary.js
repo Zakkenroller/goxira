@@ -165,7 +165,12 @@ exports.handler = async (event) => {
       return `Move ${turn}: winrate dropped ${delta}% for ${toPlayWord}.${topMovesStr}`;
     }).join('\n\n');
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // Claude has whatever time remains before Netlify's 26s hard limit.
+    // Add an explicit 6s timeout so we can degrade gracefully instead of being killed mid-response.
+    const claudeTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Claude API timeout')), 6000)
+    );
+    const claudeFetch = fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -174,7 +179,7 @@ exports.handler = async (event) => {
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 700,
+        max_tokens: 500,
         system: `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
 GROUNDING RULES:
 - Reference ONLY moves and evaluations present in the KataGo data provided below.
@@ -196,19 +201,41 @@ Atari, Ladder, Net, Snapback, Ko, KoFight, Seki, LifeAndDeath, Eye, FalseEye, Tw
 If none of these match, use the closest one.`,
         messages: [{
           role: 'user',
-          content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.\n\n${winrateSummaryStr}\n\n${momentPromptParts}\n\nSGF: ${sgf}`,
+          content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.\n\n${winrateSummaryStr}\n\n${momentPromptParts}`,
         }],
       }),
+    }).then(async res => {
+      const data = await res.json();
+      if (!res.ok) throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
+      return data;
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
+    let summary;
+    try {
+      const data = await Promise.race([claudeFetch, claudeTimeout]);
+      const raw   = data.content[0].text;
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
+      summary = JSON.parse(match[0]);
+    } catch (claudeErr) {
+      // Claude timed out or errored — return KataGo turns data so the winrate chart still renders.
+      // The user gets the chart without commentary rather than a total failure.
+      console.error('Claude commentary failed:', claudeErr.message);
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          summary: {
+            overallComment: 'Game commentary is temporarily unavailable, but your winrate chart is ready below.',
+            keyMoments: [],
+            studyTopic: null,
+            studyKeyword: null,
+            errorTags: [],
+          },
+          turns: katagoResult.turns,
+        }),
+      };
     }
-    const raw   = data.content[0].text;
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
-    const summary = JSON.parse(match[0]);
 
     // Tag each key moment with an error category and produce a flat errorTags array
     // for efficient pattern aggregation across games.
