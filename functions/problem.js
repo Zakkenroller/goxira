@@ -216,6 +216,71 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
   return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
 }
 
+// ── Pre-move full-board liberty analysis ──────────────────────────────────
+// Computes liberty counts for all groups on the board BEFORE the move is played.
+// Filters to contested groups (≤ 6 liberties) to give Claude grounded context
+// for distinguishing attack from defense problems.
+
+function computePremoveContext(stones, toPlay, boardSize) {
+  const toPlayWord   = toPlay === 'B' ? 'Black' : 'White';
+  const opponentWord = toPlay === 'B' ? 'White' : 'Black';
+  const visited = new Set();
+  const contested = [];
+
+  for (const key of Object.keys(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 6) continue;
+    const color = stones[key];
+    const colorWord = color === toPlay ? toPlayWord : opponentWord;
+    const stoneCoords = [...group].map(k => {
+      const [gc, gr] = k.split(',').map(Number);
+      return toGoNotation(gc, gr, boardSize);
+    }).sort().join(', ');
+    const libCoords = [...libs].map(k => {
+      const [lc, lr] = k.split(',').map(Number);
+      return toGoNotation(lc, lr, boardSize);
+    }).sort().join(', ');
+    contested.push(
+      `${colorWord} group [${stoneCoords}]: ${libs.size} libert${libs.size === 1 ? 'y' : 'ies'} (${libCoords})`
+    );
+  }
+
+  return contested.length
+    ? `Pre-move contested groups:\n${contested.join('\n')}`
+    : '';
+}
+
+// Returns 'attack' if the solution fills a liberty of a low-liberty opponent group,
+// 'defense' if adjacent to a low-liberty to-play group, or 'unknown'.
+function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
+  const opponent = toPlay === 'B' ? 'W' : 'B';
+  const solutionKey = `${solutionCol},${solutionRow}`;
+  const visited = new Set();
+
+  for (const [key, color] of Object.entries(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 4) continue;
+
+    if (color === opponent && libs.has(solutionKey)) return 'attack';
+    if (color === toPlay) {
+      const adj = [
+        [solutionCol - 1, solutionRow], [solutionCol + 1, solutionRow],
+        [solutionCol, solutionRow - 1], [solutionCol, solutionRow + 1],
+      ];
+      if (adj.some(([ac, ar]) => group.has(`${ac},${ar}`))) return 'defense';
+    }
+  }
+  return 'unknown';
+}
+
 async function enrichWithText(problem, rank) {
   const { board_size, to_play, stones, solution_col, solution_row, category } = problem;
 
@@ -228,13 +293,23 @@ async function enrichWithText(problem, rank) {
   const facts      = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
   const factsStr   = tacticalFactsString(facts, solutionNote, toPlayWord, opponentWord);
 
+  // Pre-move liberty analysis: determines whether this is an attack or defense problem
+  const premoveContext = computePremoveContext(stones, to_play, board_size);
+  const problemRole    = inferProblemRole(stones, to_play, solution_col, solution_row, board_size);
+  const roleLabel = problemRole === 'attack'
+    ? `Problem role: ATTACK — ${toPlayWord} is killing the ${opponentWord} group. Describe the task as preventing the ${opponentWord} group from forming two eyes, NOT as ${toPlayWord} creating eyes for itself.`
+    : problemRole === 'defense'
+    ? `Problem role: DEFENSE — ${toPlayWord} is securing eye space for its own group. Describe the task as ${toPlayWord} making two eyes or finding the vital point to live.`
+    : '';
+
   // Problem-type vocabulary constraints
   const problemCategory = category || 'life_death';
   const categoryInstruction = problemCategory === 'life_death'
     ? `PROBLEM TYPE: LIFE AND DEATH
-- The description must frame the task in life/death terms: "find the move to live", "find the vital point to kill White", "secure two eyes", etc. Never use territory or invasion language.
+- The description must frame the task in life/death terms using the Problem role provided. For ATTACK: "find the vital point to kill White", "prevent White from forming two eyes". For DEFENSE: "find the move to live", "secure two eyes". NEVER use territory, invasion, or large-scale strategic language.
 - The hint must reference life/death concepts: eye space, vital point, two eyes, ko, miai, liberties.
-- The explanation must use life/death vocabulary. If the facts show an immediate capture or atari, explain what that does to the group's eye space or liberty count.`
+- The explanation must use life/death vocabulary. If the facts show an immediate capture or atari, explain what that does to the group's eye space or liberty count.
+- The "Pre-move contested groups" data is ground truth. Use it to identify which group is in danger and describe the problem accordingly.`
     : problemCategory === 'tesuji'
     ? `PROBLEM TYPE: TESUJI — The description and hint should name the tesuji technique if it is identifiable from the facts.`
     : `PROBLEM TYPE: ${problemCategory.toUpperCase()}`;
@@ -263,7 +338,7 @@ Verified board facts are computed by a deterministic rules engine. They are grou
 ${categoryInstruction}`,
         messages: [{
           role: 'user',
-          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.\n\n${factsStr}`,
+          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
         }],
       }),
     });

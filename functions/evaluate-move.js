@@ -110,6 +110,72 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
   return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
 }
 
+// ── Pre-move full-board liberty analysis ──────────────────────────────────
+// Computes liberty counts for all groups on the board BEFORE the move is played.
+// Filters to contested groups (≤ 6 liberties) to give Claude grounded context
+// for distinguishing attack problems (Black killing White) from defense problems
+// (Black making eyes for its own group).
+
+function computePremoveContext(stones, toPlay, boardSize) {
+  const toPlayWord   = toPlay === 'B' ? 'Black' : 'White';
+  const opponentWord = toPlay === 'B' ? 'White' : 'Black';
+  const visited = new Set();
+  const contested = [];
+
+  for (const key of Object.keys(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 6) continue; // stable group — omit to reduce noise
+    const color = stones[key];
+    const colorWord = color === toPlay ? toPlayWord : opponentWord;
+    const stoneCoords = [...group].map(k => {
+      const [gc, gr] = k.split(',').map(Number);
+      return toGoNotation(gc, gr, boardSize);
+    }).sort().join(', ');
+    const libCoords = [...libs].map(k => {
+      const [lc, lr] = k.split(',').map(Number);
+      return toGoNotation(lc, lr, boardSize);
+    }).sort().join(', ');
+    contested.push(
+      `${colorWord} group [${stoneCoords}]: ${libs.size} libert${libs.size === 1 ? 'y' : 'ies'} (${libCoords})`
+    );
+  }
+
+  return contested.length
+    ? `Pre-move contested groups:\n${contested.join('\n')}`
+    : '';
+}
+
+// Returns 'attack' if the solution fills a liberty of a low-liberty opponent group,
+// 'defense' if it expands a low-liberty to-play group, or 'unknown'.
+function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
+  const opponent = toPlay === 'B' ? 'W' : 'B';
+  const solutionKey = `${solutionCol},${solutionRow}`;
+  const visited = new Set();
+
+  for (const [key, color] of Object.entries(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 4) continue;
+
+    if (color === opponent && libs.has(solutionKey)) return 'attack';
+    if (color === toPlay) {
+      const adj = [
+        [solutionCol - 1, solutionRow], [solutionCol + 1, solutionRow],
+        [solutionCol, solutionRow - 1], [solutionCol, solutionRow + 1],
+      ];
+      if (adj.some(([ac, ar]) => group.has(`${ac},${ar}`))) return 'defense';
+    }
+  }
+  return 'unknown';
+}
+
 // ── KataGo: top-5 position evaluation ────────────────────────────────────
 // Returns { winrate, scoreLead, bestMove, topMoves } or null if KataGo unavailable.
 async function katagoEval(initialStones, playerMove, boardSize) {
@@ -175,6 +241,19 @@ exports.handler = async (event) => {
 
     const studentFactsStr = tacticalFactsString(studentFacts, studentMove, toPlayWord, opponentWord);
     const correctFactsStr = tacticalFactsString(correctFacts, correctMove, toPlayWord, opponentWord);
+
+    // ── Pre-move liberty analysis: determines attack vs. defense role ──
+    const premoveContext = computePremoveContext(setupStones, toPlay, boardSize);
+    const problemRole    = inferProblemRole(
+      setupStones, toPlay,
+      problem.solution.move[0], problem.solution.move[1],
+      boardSize
+    );
+    const roleLabel = problemRole === 'attack'
+      ? `Problem role: ATTACK — ${toPlayWord} is killing the ${opponentWord} group. The solution reduces the ${opponentWord} group's liberties or eye space. Do NOT describe ${toPlayWord} as creating eyes for itself.`
+      : problemRole === 'defense'
+      ? `Problem role: DEFENSE — ${toPlayWord} is securing eye space for its own group. The solution helps ${toPlayWord} live.`
+      : '';
 
     // ── KataGo: top 5 candidate moves with principal variations ──
     const katagoStones = stonesToKataGo(setupStones, boardSize);
@@ -273,7 +352,8 @@ Correct → Confirm using the verified facts for why the move works.`,
 Student rank: ${rank}. Attempt #${attemptNumber}.
 Student played: ${studentMove}. Correct answer: ${correctMove}.
 Move is ${isCorrect ? 'CORRECT' : 'INCORRECT'}.
-
+${roleLabel ? `\n${roleLabel}` : ''}
+${premoveContext ? `\n${premoveContext}\n` : ''}
 ${studentFactsStr}
 ${isCorrect ? '' : correctFactsStr}${katagoContext}`,
         }],
