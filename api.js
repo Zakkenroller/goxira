@@ -25,8 +25,17 @@ const API = (() => {
     assess(messages, userContext) {
       return post('assess', { messages, userContext });
     },
-    generateProblem(rank, topic, boardSize) {
-      return post('problem', { rank, topic, boardSize });
+    generateProblem(rank, topic, boardSize, category, userId) {
+      return post('problem', { rank, topic, boardSize, category, userId });
+    },
+    updateSchedule(userId, problemId, solved, hintsUsed, attemptNumber) {
+      return post('update-schedule', { userId, problemId, solved, hintsUsed, attemptNumber });
+    },
+    josekiLookup(positionHash, category) {
+      return post('joseki-lookup', { positionHash, category });
+    },
+    josekiDeviation(moveSequence, deviationMove, boardSize, rank) {
+      return post('joseki-deviation', { moveSequence, deviationMove, boardSize, rank });
     },
     evaluateMove(problem, col, row, attemptNumber, rank) {
       return post('evaluate-move', { problem, col, row, attemptNumber, rank });

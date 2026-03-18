@@ -290,6 +290,7 @@
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script src="board.js"></script>
+  <script src="glossary.js"></script>
   <script>
     // ── State ─────────────────────────────────────────────────────
     let userId      = null;
@@ -760,6 +761,9 @@
             : '');
         sec.appendChild(div);
       }
+
+      // Wrap Go terms in all Claude-generated text
+      Glossary.wrap(sec);
 
       // Re-render winrate chart now that keyMoments are known (for ticks)
       if (winrateTurns.length) renderWinrateChart();

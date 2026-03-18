@@ -277,6 +277,7 @@
   </script>
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
+  <script src="glossary.js"></script>
   <script>
     const SENSEI_BASE = 'https://senseis.xmp.net/?';
     const MIN_GAMES   = 5;
@@ -467,6 +468,9 @@
         });
         sec.appendChild(list);
       }
+
+      // Wrap Go terms in Claude-generated content
+      Glossary.wrap(sec);
 
       // Meta
       const meta = document.createElement('p');

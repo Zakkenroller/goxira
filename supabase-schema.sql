@@ -118,7 +118,12 @@ create table public.tsumego_problems (
   to_play      text not null check (to_play in ('B', 'W')),
   stones       jsonb not null,        -- { "col,row": "B"|"W", ... }
   solution_col integer not null,
-  solution_row integer not null
+  solution_row integer not null,
+  category     text not null default 'life_death'
+               check (category in ('life_death', 'tesuji', 'shape'))
+               -- 'life_death': classic tsumego (live/kill)
+               -- 'tesuji':     tactical exploitation patterns (snapback, squeeze, etc.)
+               -- 'shape':      stone efficiency and good/bad shape drills
 );
 
 alter table public.tsumego_problems enable row level security;
@@ -126,3 +131,48 @@ alter table public.tsumego_problems enable row level security;
 -- Problems are read-only for authenticated users (no user-owned rows)
 create policy "Problems: read for authenticated" on public.tsumego_problems
   for select using (auth.role() = 'authenticated');
+
+-- ── Spaced Repetition Schedule ────────────────────────────────────────────
+-- One row per (user, problem). Tracks SM-2 state for adaptive review scheduling.
+-- When a problem is first attempted, a row is inserted here.
+-- After each review, ease_factor, interval, and next_review_date are updated.
+create table public.problem_schedule (
+  id                   uuid primary key default uuid_generate_v4(),
+  user_id              uuid not null references public.users(id) on delete cascade,
+  problem_id           text not null,          -- matches problem_attempts.problem_id format: 'db_<uuid>'
+  ease_factor          numeric(4,2) not null default 2.5,  -- SM-2: starts at 2.5, min 1.3
+  interval_days        integer not null default 1,         -- days until next review
+  consecutive_correct  integer not null default 0,
+  next_review_date     date not null default current_date,
+  last_reviewed_at     timestamptz not null default now(),
+  unique (user_id, problem_id)
+);
+
+alter table public.problem_schedule enable row level security;
+create policy "Schedule: all own" on public.problem_schedule
+  for all using (auth.uid() = user_id);
+
+-- ── Opening Patterns (Joseki / Fuseki dictionary) ─────────────────────────
+-- Stores navigable SGF sequences for the interactive opening explorer.
+-- Each row is a named pattern (joseki variation or fuseki line).
+-- The sgf_tree column is the raw SGF string for that line/variation.
+-- position_hash is a stable key derived from the move sequence (for lookups).
+create table public.opening_patterns (
+  id             uuid primary key default uuid_generate_v4(),
+  name           text not null,            -- e.g. 'San-San Invasion', 'Chinese Opening'
+  category       text not null            -- 'joseki' | 'fuseki'
+               check (category in ('joseki', 'fuseki')),
+  corner         text,                     -- 'corner', 'side', 'whole-board', null for fuseki
+  difficulty     integer not null default 1 check (difficulty in (1, 2, 3)),
+  moves          jsonb not null,           -- ordered array of moves: [{"color":"B","x":3,"y":3}, ...]
+  position_hash  text not null,            -- SHA-like fingerprint of moves sequence for fast lookup
+  description    text,                     -- brief human-readable description
+  result         text,                     -- outcome summary: 'equal', 'territory', 'influence'
+  tags           text[] default '{}',      -- e.g. ['star-point', '3-3', 'invasion']
+  created_at     timestamptz not null default now()
+);
+
+alter table public.opening_patterns enable row level security;
+-- Opening patterns are public read — no user data
+create policy "Openings: public read" on public.opening_patterns
+  for select using (true);

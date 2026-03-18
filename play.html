@@ -373,6 +373,7 @@
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script src="board.js"></script>
+  <script src="glossary.js"></script>
   <script>
     let board             = null;
     let boardSize         = 9;
@@ -1040,6 +1041,7 @@
     function setCommentary(text) {
       const el = document.getElementById('move-commentary');
       el.textContent = text;
+      Glossary.wrap(el);
       el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 

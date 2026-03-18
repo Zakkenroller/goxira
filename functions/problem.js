@@ -29,18 +29,74 @@ function boardRegion(col, row, boardSize) {
   return `${vert}-${horiz}`;
 }
 
-async function fetchProblemFromDB(difficulty) {
-  const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/tsumego_problems`);
+async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
+  const base = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  // If a logged-in user is requesting, try to serve an SRS-due problem first.
+  // A problem is "due" when next_review_date <= today.
+  if (userId) {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const schedUrl = new URL(`${base}/rest/v1/problem_schedule`);
+      schedUrl.searchParams.set('user_id',          `eq.${userId}`);
+      schedUrl.searchParams.set('next_review_date', `lte.${today}`);
+      schedUrl.searchParams.set('order',            'next_review_date.asc');
+      schedUrl.searchParams.set('limit',            '20'); // fetch a batch, pick one matching difficulty
+      schedUrl.searchParams.set('select',           'problem_id');
+
+      const schedRes = await fetch(schedUrl.toString(), {
+        headers: {
+          'apikey':        anonKey,
+          'Authorization': authHeader || `Bearer ${anonKey}`,
+        },
+      });
+
+      if (schedRes.ok) {
+        const due = await schedRes.json();
+        // Extract raw UUIDs (strip 'db_' prefix)
+        const uuids = due
+          .map(r => r.problem_id.replace(/^db_/, ''))
+          .filter(id => /^[0-9a-f-]{36}$/.test(id));
+
+        if (uuids.length) {
+          // Fetch the actual problems for these IDs and filter by difficulty + category
+          const inFilter = uuids.map(id => `"${id}"`).join(',');
+          const pUrl = new URL(`${base}/rest/v1/tsumego_problems`);
+          pUrl.searchParams.set('id',        `in.(${uuids.join(',')})`);
+          pUrl.searchParams.set('difficulty', `eq.${difficulty}`);
+          if (category) pUrl.searchParams.set('category', `eq.${category}`);
+          pUrl.searchParams.set('select',    'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row,category');
+          pUrl.searchParams.set('limit',     '1');
+
+          const pRes = await fetch(pUrl.toString(), {
+            headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` },
+          });
+          if (pRes.ok) {
+            const pRows = await pRes.json();
+            if (pRows.length) return pRows[0]; // SRS hit
+          }
+        }
+      }
+    } catch (e) {
+      // SRS lookup failure is non-fatal — fall through to random selection
+      console.warn('SRS lookup failed, falling back to random:', e.message);
+    }
+  }
+
+  // Default: random problem by difficulty (and optional category)
+  const url = new URL(`${base}/rest/v1/tsumego_problems`);
   url.searchParams.set('difficulty', `eq.${difficulty}`);
-  url.searchParams.set('select', 'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row');
-  url.searchParams.set('limit', '1');
+  if (category) url.searchParams.set('category', `eq.${category}`);
+  url.searchParams.set('select', 'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row,category');
+  url.searchParams.set('limit',  '1');
   const offset = Math.floor(Math.random() * 300);
   url.searchParams.set('offset', String(offset));
 
   const res = await fetch(url.toString(), {
     headers: {
-      'apikey': process.env.SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+      'apikey':        anonKey,
+      'Authorization': `Bearer ${anonKey}`,
     },
   });
 
@@ -207,15 +263,16 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   try {
-    const { rank } = JSON.parse(event.body);
+    const authHeader = event.headers['authorization'] || event.headers['Authorization'] || '';
+    const { rank, category, userId } = JSON.parse(event.body);
     const difficulty = rankToDifficulty(rank);
 
-    const row  = await fetchProblemFromDB(difficulty);
+    const row  = await fetchProblemFromDB(difficulty, category || null, userId || null, authHeader);
     const text = await enrichWithText(row, rank || '20 kyu');
 
     const problem = {
       id:          `db_${row.id}`,
-      topic:       'capture',
+      topic:       row.category || 'life_death',
       difficulty:  row.difficulty,
       boardSize:   row.board_size,
       description: text.description,
