@@ -202,6 +202,19 @@ exports.handler = async (event) => {
     let katagoContext = '';
     let systemPreamble = '';
 
+    // Problem-type-specific vocabulary and constraints
+    const problemTopic = problem.topic || 'life_death';
+    const problemTypeSection = problemTopic === 'life_death'
+      ? `PROBLEM TYPE: LIFE AND DEATH (tsumego)
+This is a closed local problem about group survival. Commentary rules:
+- Use life/death vocabulary exclusively: eye space, two eyes, false eye, vital point, ko, seki, miai, liberties.
+- Explain the move in terms of how it creates or prevents eyes, or how it reduces/expands the group's liberty count.
+- NEVER use territory, fuseki, invasion, or large-scale strategic language. This is a local life/death fight.`
+      : problemTopic === 'tesuji'
+      ? `PROBLEM TYPE: TESUJI
+Focus on the specific technique demonstrated (ladder, snapback, squeeze, etc.). Name the tesuji.`
+      : `PROBLEM TYPE: ${problemTopic.toUpperCase()}`;
+
     if (katago) {
       const winPct   = Math.round((katago.winrate ?? 0.5) * 100);
       const scoreStr = katago.scoreLead != null
@@ -220,12 +233,16 @@ GROUNDING RULES:
 - Do NOT invent variations, sequences, or moves not in KataGo's top-5 list.
 - Do NOT estimate or fabricate win rates. Use KataGo's numbers exactly.
 - The "Verified tactical facts" section is computed by a deterministic rules engine (captures, atari, liberties). These are ground truth. Use them.
-- If the data doesn't cover something, say so honestly. Saying less is always better than fabricating.`;
+- If the data doesn't cover something, say so honestly. Saying less is always better than fabricating.
+
+${problemTypeSection}`;
     } else {
       systemPreamble = `You are a Go tutor evaluating a student's tsumego attempt. Be concise (under 80 words) and honest. No markdown.
 KataGo engine data is not available for this position. You may ONLY reference the verified tactical facts below (captures, atari). Do NOT estimate whether this move is strategically good or bad. Do NOT invent win rates or suggest alternative moves. You can describe what the move physically does on the board and nothing more.
 If the verified facts show "no immediate captures or atari" for the correct move, you may only confirm the move is correct and state that its strategic value requires engine data to explain.
-The "Verified tactical facts" section is computed by a deterministic rules engine and is ground truth.`;
+The "Verified tactical facts" section is computed by a deterministic rules engine and is ground truth.
+
+${problemTypeSection}`;
     }
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -241,9 +258,9 @@ The "Verified tactical facts" section is computed by a deterministic rules engin
         system: `${systemPreamble}
 
 TEACHING CALIBRATION:
-- 25k–15k: Simple language. Focus on what happened tactically (captures, escapes). One concept at a time.
-- 15k–5k: Introduce strategic reasoning. Explain why a move is directionally wrong. Reference shapes and patterns by name.
-- 5k–1d+: Full strategic discussion. Discuss aji, thickness, direction of play. Reference joseki and fuseki concepts where relevant.
+- 25k–15k: Simple language. Focus on what happened (captures, atari, eye creation). One concept at a time.
+- 15k–5k: Name the tactical concept. For life/death: explain vital points and eye-making/destroying moves.
+- 5k–1d+: Full tactical depth. For life/death: discuss miai, ko threats, seki, false eyes. For other types: discuss aji, thickness, direction of play.
 
 RESPONSE STYLE (be concise, under 80 words):
 Attempt 1 wrong → Socratic hint toward the key tactical concept. Do not reveal the answer coordinate.
@@ -252,7 +269,7 @@ Attempt 3+ wrong → State the correct answer and explain it using only the veri
 Correct → Confirm using the verified facts for why the move works.`,
         messages: [{
           role: 'user',
-          content: `Problem: ${problem.description}
+          content: `Problem type: ${problemTopic}. Problem: ${problem.description}
 Student rank: ${rank}. Attempt #${attemptNumber}.
 Student played: ${studentMove}. Correct answer: ${correctMove}.
 Move is ${isCorrect ? 'CORRECT' : 'INCORRECT'}.
