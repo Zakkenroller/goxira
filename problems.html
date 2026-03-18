@@ -32,6 +32,17 @@
     .to-play__stone--b { background: var(--ink); }
     .to-play__stone--w { background: white; border: 1.5px solid var(--ink-faint); }
 
+    /* ── Engine status badge ── */
+    .engine-badge {
+      font-size: 0.65rem; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 0.2rem 0.5rem;
+      border-radius: 100px;
+      color: var(--wrong); background: rgba(139,26,26,0.08);
+      border: 1.5px solid rgba(139,26,26,0.25);
+      display: none;
+    }
+    .engine-badge.show { display: inline-block; }
+
     /* ── Board container ── */
     .board-container {
       background: var(--board);
@@ -255,6 +266,7 @@
       <div class="problem-header">
         <div class="problem-meta">
           <span class="topic-badge" id="topic-badge">Loading…</span>
+          <span class="engine-badge" id="engine-badge">Engine offline</span>
           <div class="to-play" id="to-play" style="display:none">
             <div class="to-play__stone" id="to-play-stone"></div>
             <span id="to-play-label">to play</span>
@@ -362,6 +374,15 @@
 
       totalSolved = await UserDB.getSolvedCount(userId);
       document.getElementById('stat-solved').textContent = totalSolved;
+
+      // Warm up the KataGo connection and surface engine status to the user.
+      // Fire-and-forget: doesn't block problem loading.
+      fetch('/.netlify/functions/engine-status')
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ok) document.getElementById('engine-badge').classList.add('show');
+        })
+        .catch(() => {});
 
       await loadNewProblem();
     }

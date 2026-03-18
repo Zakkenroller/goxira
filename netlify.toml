@@ -21,3 +21,6 @@
 
 [functions."game-hint"]
   timeout = 26
+
+[functions."evaluate-move"]
+  timeout = 26

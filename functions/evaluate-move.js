@@ -114,7 +114,7 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
 // Returns { winrate, scoreLead, bestMove, topMoves } or null if KataGo unavailable.
 async function katagoEval(initialStones, playerMove, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
-  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 6000));
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 10000));
   try {
     const fetchResult = fetch(`${KATAGO_SERVICE_URL}/analyze-position`, {
       method: 'POST',
@@ -186,7 +186,7 @@ exports.handler = async (event) => {
     const correctIsIndirect = correctFacts.captured.length === 0 && correctFacts.atari.length === 0;
     if (!katago && correctIsIndirect && !isCorrect) {
       const cannedHint = attemptNumber >= 3
-        ? `The correct answer is ${correctMove}. This is a positional or indirect move — without the engine I can't explain why it's better than your choice. The Go engine is temporarily unavailable.`
+        ? `Not quite — the correct move is ${correctMove}. See the explanation below.`
         : `That's not the key move here. This problem involves positional judgment rather than an immediate capture or atari — look for a move that changes the overall shape or balance.`;
       return {
         statusCode: 200,
