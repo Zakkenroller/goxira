@@ -171,8 +171,14 @@
     /* ── Category tabs ── */
     .category-tabs {
       display: flex; gap: 0.4rem;
-      margin-bottom: 0.75rem;
+      margin-bottom: 0.5rem;
       animation: fadeUp 0.3s ease both;
+    }
+
+    /* ── Category definition ── */
+    .category-def {
+      font-size: 0.8rem; color: var(--ink-faint); line-height: 1.5;
+      margin-bottom: 0.75rem; min-height: 1.2em;
     }
     .category-tab {
       flex: 1; padding: 0.4rem 0.5rem;
@@ -289,6 +295,7 @@
         <button class="category-tab" data-cat="tesuji"     onclick="selectCategory(this, 'tesuji')">Tesuji</button>
         <button class="category-tab" data-cat="shape"      onclick="selectCategory(this, 'shape')">Shape</button>
       </div>
+      <p class="category-def" id="category-def"></p>
 
       <!-- Problem header -->
       <div class="problem-header">
@@ -390,10 +397,23 @@
     let prefetchedProblem = null;  // next problem preloaded in background
     let prefetchPromise   = null;  // in-flight prefetch Promise
 
+    const CATEGORY_DEFS = {
+      '':           'Tactical puzzles from all categories — find the vital move to solve each position.',
+      'life_death': 'Life & Death: determine whether a group can survive or be killed. Mastering this is the foundation of Go — groups with no two eyes cannot live.',
+      'tesuji':     'Tesuji: a clever tactical move that solves a local problem efficiently — often unexpected, exploiting a weakness in the opponent\'s shape.',
+      'shape':      'Shape: recognize good and bad stone formations. Efficient shapes strengthen your groups; bad shapes like the empty triangle waste stones.',
+    };
+
+    function setCategoryDef(cat) {
+      const el = document.getElementById('category-def');
+      if (el) el.textContent = CATEGORY_DEFS[cat] || '';
+    }
+
     function selectCategory(btn, cat) {
       selectedCategory = cat;
       document.querySelectorAll('.category-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      setCategoryDef(cat);
       prefetchedProblem = null;
       prefetchPromise   = null;
       loadNewProblem();
@@ -410,6 +430,7 @@
 
       document.getElementById('stat-rank').textContent  = userProfile.current_rank;
       document.getElementById('stat-score').textContent = userProfile.rank_score;
+      setCategoryDef(selectedCategory);
 
       totalSolved = await UserDB.getSolvedCount(userId);
       document.getElementById('stat-solved').textContent = totalSolved;
