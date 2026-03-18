@@ -559,13 +559,7 @@
 
       const PADDING = 28;
       const CELL    = 36;
-
-      // Make SVG fill container width responsively
-      svg.setAttribute('width', '100%');
-      svg.removeAttribute('height');
-      svg.style.width  = '100%';
-      svg.style.height = 'auto';
-      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      const total   = PADDING * 2 + CELL * (boardSize - 1);
 
       const stoneKeys = Object.keys(problem.setup?.stones || {});
       if (!stoneKeys.length) return;
@@ -586,11 +580,20 @@
       const maxRow = Math.min(boardSize - 1, Math.max(...allRows) + PAD);
 
       const margin = CELL * 0.75;
-      const vbX = PADDING + minCol * CELL - margin;
-      const vbY = PADDING + minRow * CELL - margin;
-      const vbW = (maxCol - minCol) * CELL + margin * 2 + CELL;
-      const vbH = (maxRow - minRow) * CELL + margin * 2 + CELL;
-      svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
+      let vbX = PADDING + minCol * CELL - margin;
+      let vbY = PADDING + minRow * CELL - margin;
+      let vbW = (maxCol - minCol) * CELL + margin * 2 + CELL;
+      let vbH = (maxRow - minRow) * CELL + margin * 2 + CELL;
+
+      // Force a square viewBox so the SVG fills the square container without
+      // letterboxing. A non-square viewBox with height:100%/width:auto (mobile CSS)
+      // causes the SVG to be narrower than the container, exposing the container
+      // background as a fake "full board" behind the actual cropped SVG.
+      const vbSize = Math.max(vbW, vbH);
+      if (vbW < vbSize) vbX -= (vbSize - vbW) / 2;
+      if (vbH < vbSize) vbY -= (vbSize - vbH) / 2;
+
+      svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbSize} ${vbSize}`);
     }
 
     // ── Handle user move ─────────────────────────────────────────
