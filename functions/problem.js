@@ -217,7 +217,7 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
 }
 
 async function enrichWithText(problem, rank) {
-  const { board_size, to_play, stones, solution_col, solution_row } = problem;
+  const { board_size, to_play, stones, solution_col, solution_row, category } = problem;
 
   const toPlayWord   = to_play === 'B' ? 'Black' : 'White';
   const opponentWord = to_play === 'B' ? 'White' : 'Black';
@@ -227,6 +227,17 @@ async function enrichWithText(problem, rank) {
   // Compute verified tactical facts for the solution move
   const facts      = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
   const factsStr   = tacticalFactsString(facts, solutionNote, toPlayWord, opponentWord);
+
+  // Problem-type vocabulary constraints
+  const problemCategory = category || 'life_death';
+  const categoryInstruction = problemCategory === 'life_death'
+    ? `PROBLEM TYPE: LIFE AND DEATH
+- The description must frame the task in life/death terms: "find the move to live", "find the vital point to kill White", "secure two eyes", etc. Never use territory or invasion language.
+- The hint must reference life/death concepts: eye space, vital point, two eyes, ko, miai, liberties.
+- The explanation must use life/death vocabulary. If the facts show an immediate capture or atari, explain what that does to the group's eye space or liberty count.`
+    : problemCategory === 'tesuji'
+    ? `PROBLEM TYPE: TESUJI — The description and hint should name the tesuji technique if it is identifiable from the facts.`
+    : `PROBLEM TYPE: ${problemCategory.toUpperCase()}`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -247,7 +258,9 @@ Verified board facts are computed by a deterministic rules engine. They are grou
 - The explanation MUST be grounded in and consistent with the provided facts.
 - Do NOT add tactical claims beyond the facts (no invented liberty counts, alternative moves, or continuations).
 - The hint must guide toward the concept without giving away the coordinate.
-- Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.`,
+- Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.
+
+${categoryInstruction}`,
         messages: [{
           role: 'user',
           content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.\n\n${factsStr}`,
