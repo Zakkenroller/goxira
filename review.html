@@ -450,12 +450,17 @@
             winrateTurns = data.turns;
             if (winrateWrap) winrateWrap.parentElement.style.display = '';
             renderWinrateChart();
+            if (userId && userId === currentGameOwner) {
+              UserDB.saveTurns(game.id, data.turns);
+            }
           } else if (!data.turns?.length && !game.turns?.length) {
             if (winrateWrap) winrateWrap.parentElement.style.display = 'none';
           }
           // Persist ai_summary so pattern analysis can aggregate it later.
           // Only save when engine was available (errorTags present) and the user owns the game.
-          if (!engineDown && data.summary?.errorTags && userId && userId === currentGameOwner) {
+          if (!engineDown && data.summary?.errorTags
+              && !data.summary?.overallComment?.toLowerCase().includes('unavailable')
+              && userId && userId === currentGameOwner) {
             UserDB.saveAiSummary(game.id, data.summary);
           }
         })
