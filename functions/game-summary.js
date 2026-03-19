@@ -235,7 +235,7 @@ If none of these match, use the closest one.`,
         headers,
         body: JSON.stringify({
           summary: {
-            overallComment: 'Game commentary is temporarily unavailable, but your winrate chart is ready below.',
+            overallComment: 'Game commentary is temporarily unavailable, but your winrate chart is shown above.',
             keyMoments: [],
             studyTopic: null,
             studyKeyword: null,
