@@ -43,8 +43,10 @@ const API = (() => {
     analyzeMove(sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis) {
       return post('analyze-move', { sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis });
     },
-    gameSummary(sgf, boardSize, rank, playerColor) {
-      return post('game-summary', { sgf, boardSize, rank, playerColor });
+    gameSummary(sgf, boardSize, rank, playerColor, turns = null) {
+      const body = { sgf, boardSize, rank, playerColor };
+      if (turns?.length) body.turns = turns;
+      return post('game-summary', body);
     },
     getHint(sgf, boardSize, rank, playerColor, currentStones, moveNumber) {
       return post('game-hint', { sgf, boardSize, rank, playerColor, currentStones, moveNumber });

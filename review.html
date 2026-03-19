@@ -419,22 +419,38 @@
     // ── Game analysis (with retry) ───────────────────────────────
     function loadAnalysis(game, boardSize, playerColor) {
       const rank = userProfile?.current_rank || '20 kyu';
-      // Always show a loading indicator immediately — this makes retry feel responsive.
       const sec = document.getElementById('analysis-section');
-      sec.innerHTML = '<div class="analysis-loading"><span class="loader"></span> Analysing game…</div>';
       const winrateWrap = document.getElementById('winrate-wrap');
-      if (winrateWrap) winrateWrap.parentElement.style.display = '';
 
-      API.gameSummary(game.sgf_content, boardSize, rank, playerColor)
+      // Serve cached winrate chart immediately — no API call needed.
+      if (game.turns?.length) {
+        winrateTurns = game.turns;
+        if (winrateWrap) winrateWrap.parentElement.style.display = '';
+        renderWinrateChart();
+      }
+
+      // If both chart and commentary are cached, render everything from DB — zero API calls.
+      if (game.ai_summary) {
+        renderAnalysis(game.ai_summary, null);
+        return;
+      }
+
+      // Commentary not yet cached — request it from the API.
+      // Pass cached turns so game-summary.js skips the 18s KataGo full-game analyze call.
+      sec.innerHTML = '<div class="analysis-loading"><span class="loader"></span> Analysing game…</div>';
+      if (!game.turns?.length && winrateWrap) winrateWrap.parentElement.style.display = '';
+
+      API.gameSummary(game.sgf_content, boardSize, rank, playerColor, game.turns?.length ? game.turns : null)
         .then(data => {
           // Detect engine-unavailable fallback: no turns and empty keyMoments
           const engineDown = !data.turns?.length && data.summary?.keyMoments?.length === 0
             && data.summary?.overallComment?.toLowerCase().includes('unavailable');
           renderAnalysis(data.summary, engineDown ? () => loadAnalysis(game, boardSize, playerColor) : null);
-          if (data.turns?.length) {
+          if (data.turns?.length && !game.turns?.length) {
             winrateTurns = data.turns;
+            if (winrateWrap) winrateWrap.parentElement.style.display = '';
             renderWinrateChart();
-          } else {
+          } else if (!data.turns?.length && !game.turns?.length) {
             if (winrateWrap) winrateWrap.parentElement.style.display = 'none';
           }
           // Persist ai_summary so pattern analysis can aggregate it later.
@@ -455,7 +471,7 @@
           btn.onclick = () => loadAnalysis(game, boardSize, playerColor);
           div.appendChild(btn);
           sec.appendChild(div);
-          if (winrateWrap) winrateWrap.parentElement.style.display = 'none';
+          if (!game.turns?.length && winrateWrap) winrateWrap.parentElement.style.display = 'none';
         });
     }
 

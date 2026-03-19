@@ -112,9 +112,14 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   try {
-    const { sgf, boardSize, rank, playerColor } = JSON.parse(event.body);
+    const { sgf, boardSize, rank, playerColor, turns: cachedTurns } = JSON.parse(event.body);
 
-    const katagoResult = await katagoAnalyze(sgf, boardSize);
+    // If the caller provides pre-computed turns (collected during live play), use them directly
+    // and skip the expensive full-game KataGo /analyze call (18s timeout).
+    // This is the common path for games played in the app — turns are saved at game-end.
+    const katagoResult = cachedTurns?.length
+      ? { turns: cachedTurns }
+      : await katagoAnalyze(sgf, boardSize);
 
     // If KataGo is unavailable, return a minimal honest response — do NOT ask Claude to fabricate a review.
     if (!katagoResult) {
