@@ -25,3 +25,6 @@
 
 [functions."evaluate-move"]
   timeout = 26
+
+[functions."joseki-deviation"]
+  timeout = 26

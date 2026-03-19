@@ -7,9 +7,10 @@ const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 // Fetch per-turn winrate from KataGo. Returns null if unavailable.
 async function katagoAnalyze(sgf, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
-  // 18s timeout: full-game analysis (up to ~20 positions × 20 visits each) needs more
-  // time than a single move query. 10s was too tight and caused frequent timeouts.
-  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 18000));
+  // 14s timeout: full-game analysis with 10 visits × ~20 positions (halved from 20 visits).
+  // This is only reached when turns are NOT cached (old games, uploaded SGFs).
+  // For live games, cachedTurns bypasses this call entirely.
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 14000));
   try {
     const fetchResult = fetch(`${KATAGO_SERVICE_URL}/analyze`, {
       method: 'POST',

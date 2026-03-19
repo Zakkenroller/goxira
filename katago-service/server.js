@@ -17,13 +17,24 @@ const AUTH_TOKEN         = process.env.KATAGO_TOKEN;
 
 class KataGoEngine {
   constructor() {
-    // pending: id -> { resolve, reject, expected, accumulated }
-    // expected === 1: single-response query (resolve with one object)
-    // expected > 1:   multi-response query (resolve with array when all received)
+    // pending: id -> { resolve, reject, timer, expected, accumulated }
     this.pending = new Map();
     this.idCounter = 0;
     this.proc = null;
     this.ready = false;
+
+    // Serial request queue with priority.
+    // Priority 0 (HIGH) = live-game requests (/move, /analyze-position).
+    // Priority 1 (NORMAL) = background requests (/analyze).
+    // Only one request executes at a time; HIGH items jump ahead of NORMAL items.
+    this.queue = [];
+    this.busy = false;
+
+    // Hang watchdog: SIGKILLs the process only if KataGo produces no stdout
+    // for 90s while queries are pending. Normal timeouts do NOT kill the process —
+    // they reject just that one query and let others continue.
+    this._hangTimer = null;
+    this._lastStdoutAt = Date.now();
   }
 
   start() {
@@ -46,6 +57,8 @@ class KataGoEngine {
         this.ready = true;
         clearTimeout(this._startupWatchdog);
         console.log('KataGo ready');
+        // Flush any requests that were queued while the engine was restarting.
+        this._pump();
       }
       if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('warning')) {
         console.error('KataGo:', msg.trim());
@@ -56,11 +69,16 @@ class KataGoEngine {
     rl.on('line', (line) => {
       line = line.trim();
       if (!line) return;
+
+      // Reset hang watchdog on any output.
+      this._lastStdoutAt = Date.now();
+      this._resetHangWatchdog();
+
       let data;
       try { data = JSON.parse(line); } catch (_) { return; }
 
       const entry = this.pending.get(data.id);
-      if (!entry) return;
+      if (!entry) return; // Response arrived after timeout — discard silently.
 
       entry.accumulated.push(data);
       if (entry.accumulated.length >= entry.expected) {
@@ -78,46 +96,109 @@ class KataGoEngine {
       console.error(`KataGo exited (code ${code}), restarting in 3s...`);
       this.ready = false;
       clearTimeout(this._startupWatchdog);
-      // Reject all pending queries
+      clearTimeout(this._hangTimer);
+      // Reject all pending (in-flight) queries.
       for (const [, entry] of this.pending) {
         clearTimeout(entry.timer);
         entry.reject(new Error('KataGo restarted'));
       }
       this.pending.clear();
+      this.busy = false;
+      // Do NOT clear this.queue — requests submitted while restarting will
+      // be picked up by _pump() once the engine reports ready again.
       setTimeout(() => this.start(), 3000);
     });
   }
 
+  // Reset the hang watchdog. Called every time KataGo produces stdout output.
+  // If we have pending queries and hear nothing for 90s, the process is stuck.
+  _resetHangWatchdog() {
+    clearTimeout(this._hangTimer);
+    if (this.pending.size === 0) return;
+    this._hangTimer = setTimeout(() => {
+      if (this.pending.size > 0) {
+        console.error(`KataGo hang watchdog: no stdout for 90s with ${this.pending.size} pending — killing`);
+        if (this.proc) this.proc.kill('SIGKILL');
+      }
+    }, 90000);
+  }
+
+  // Internal: send a query to KataGo's stdin and await its response(s).
+  // Does NOT kill the process on timeout — just rejects this query's promise.
   _send(params, expected, timeoutMs) {
     return new Promise((resolve, reject) => {
-      if (!this.ready) return reject(new Error('KataGo not ready'));
-
       const id = String(++this.idCounter);
       const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
+          // Stop the hang watchdog if nothing else is pending.
+          if (this.pending.size === 0) clearTimeout(this._hangTimer);
           reject(new Error('KataGo query timeout'));
-          // Kill the process — the exit handler will clear remaining pending
-          // queries and restart KataGo. Without this, a hung KataGo process
-          // causes every subsequent query to also hang until manual restart.
-          console.error(`KataGo query ${id} timed out — killing process to force restart`);
-          if (this.proc) this.proc.kill('SIGKILL');
+          // Do NOT kill the process here. The query timed out because it was
+          // slow, not because KataGo is hung. KataGo will finish computing it;
+          // when the response arrives it will be discarded (no pending entry).
+          // Killing here would cause cascade failures for every other user.
+          console.error(`KataGo query ${id} timed out (engine continues)`);
         }
       }, timeoutMs);
 
       this.pending.set(id, { resolve, reject, timer, expected, accumulated: [] });
+      this._resetHangWatchdog();
       this.proc.stdin.write(JSON.stringify({ ...params, id }) + '\n');
     });
   }
 
-  // Single-response query (for move generation)
-  query(params) {
-    return this._send(params, 1, 30000);
+  // Enqueue a request. Priority 0 = high (live game), 1 = normal (review).
+  // Returns a promise that resolves/rejects with the KataGo result.
+  // If the item waits more than 20s in queue without starting, it's rejected
+  // with "engine busy" so Netlify functions can return a graceful error.
+  _enqueue(params, expected, timeoutMs, priority) {
+    return new Promise((resolve, reject) => {
+      const queuedAt = Date.now();
+      const item = { params, expected, timeoutMs, priority, resolve, reject, queuedAt };
+      // Insert in priority order (lower number = higher priority), FIFO within same priority.
+      const idx = this.queue.findIndex(q => q.priority > priority);
+      if (idx === -1) {
+        this.queue.push(item);
+      } else {
+        this.queue.splice(idx, 0, item);
+      }
+      this._pump();
+    });
   }
 
-  // Multi-response query (for full-game analysis)
+  // Drain the queue: execute the next item if the engine is ready and idle.
+  _pump() {
+    if (this.busy || !this.ready) return;
+    if (this.queue.length === 0) return;
+
+    const item = this.queue.shift();
+
+    // Stale check: if the item has been waiting > 20s, the caller has likely
+    // already timed out — reject rather than burning compute on a dead request.
+    if (Date.now() - item.queuedAt > 20000) {
+      item.reject(new Error('engine busy'));
+      this._pump(); // Try the next item.
+      return;
+    }
+
+    this.busy = true;
+    this._send(item.params, item.expected, item.timeoutMs)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        this.busy = false;
+        this._pump();
+      });
+  }
+
+  // High-priority query (live game move, tsumego position).
+  query(params) {
+    return this._enqueue(params, 1, 30000, 0);
+  }
+
+  // Normal-priority multi-response query (full-game analysis for review).
   queryAll(params, expected) {
-    return this._send(params, expected, 120000);
+    return this._enqueue(params, expected, 120000, 1);
   }
 }
 
@@ -357,7 +438,7 @@ const server = http.createServer(async (req, res) => {
         boardXSize: boardSize,
         boardYSize: boardSize,
         analyzeTurns,
-        maxVisits: 20, // full-game pass: 20 visits × ~20 positions fits well within the Netlify timeout
+        maxVisits: 10, // full-game pass: 10 visits × ~20 positions — halves compute time, sufficient for winrate trend detection
       }, analyzeTurns.length);
 
       // Sort by turnNumber in case engine returns out of order
