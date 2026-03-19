@@ -962,6 +962,22 @@
         const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null);
         savedGameId = saved.id;
       } catch(e) { console.error('Save game error:', e); }
+
+      // Background: kick off analysis immediately so review.html finds it already cached.
+      // Fire-and-forget — no await, user stays on game-over card while this runs.
+      if (savedGameId && userId) {
+        const _rank = userProfile?.current_rank || '20 kyu';
+        API.gameSummary(buildSGF(), boardSize, _rank, playerColor,
+            turnHistory.length ? turnHistory : null)
+          .then(data => {
+            if (!data?.summary) return;
+            if (!data.summary.overallComment?.toLowerCase().includes('unavailable')
+                && data.summary.errorTags !== undefined) {
+              UserDB.saveAiSummary(savedGameId, data.summary);
+            }
+          })
+          .catch(() => {}); // silent — review page retries on next open if this fails
+      }
     }
 
     function reviewGame() {

@@ -4,6 +4,10 @@ const { keywordToCategory } = require('./_errorCategories');
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
+// Bump this when the commentary logic changes significantly.
+// Any cached summary with a lower version is treated as stale and regenerated.
+const SUMMARY_VERSION = 1;
+
 // Fetch per-turn winrate from KataGo. Returns null if unavailable.
 async function katagoAnalyze(sgf, boardSize) {
   if (!KATAGO_SERVICE_URL) return null;
@@ -262,6 +266,7 @@ If none of these match, use the closest one.`,
     }
     summary.errorTags = errorTags;
 
+    summary.version = SUMMARY_VERSION;
     return { statusCode: 200, headers, body: JSON.stringify({ summary, turns: katagoResult.turns }) };
   } catch(e) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
