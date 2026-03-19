@@ -193,6 +193,7 @@
       <a href="review.html"   class="nav__link">Review</a>
       <a href="progress.html" class="nav__link">Progress</a>
       <a href="profile.html"  class="nav__link">Profile</a>
+      <a href="#" class="nav__link" onclick="Auth.signOut();return false;">Sign Out</a>
     </div>
   </nav>
 
@@ -331,14 +332,30 @@
         try {
           profile = await UserDB.createProfile(session.user.id, displayName);
         } catch(e) {
-          console.error('Profile creation failed:', e);
-          location.href = '/auth.html';
-          return;
+          // INSERT conflict means the row already exists — getProfile had a transient
+          // failure. Retry the read once before giving up.
+          profile = await UserDB.getProfile(session.user.id);
+          if (!profile) {
+            console.error('Profile load failed after retry:', e);
+            location.href = '/auth.html';
+            return;
+          }
         }
       }
 
       // Redirect to assessment if not done
-      if (!profile.assessment_done) { location.href = '/assess.html'; return; }
+      if (!profile.assessment_done) {
+        // Before forcing re-assessment, check rank_history. If entries exist the user
+        // was already assessed — assessment_done just failed to save. Fix it silently.
+        const { data: rh } = await sb.from('rank_history')
+          .select('id').eq('user_id', session.user.id).limit(1);
+        if (rh?.length) {
+          await UserDB.markAssessmentDone(session.user.id);
+        } else {
+          location.href = '/assess.html';
+          return;
+        }
+      }
 
       // Greeting
       const hour = new Date().getHours();
