@@ -112,13 +112,10 @@ const UserDB = {
     if (error) throw error;
   },
 
-  async saveGame(userId, sgf, boardSize, source) {
-    const { data, error } = await sb.from('saved_games').insert({
-      user_id: userId,
-      sgf_content: sgf,
-      board_size: boardSize,
-      source,
-    }).select().single();
+  async saveGame(userId, sgf, boardSize, source, turns = null) {
+    const row = { user_id: userId, sgf_content: sgf, board_size: boardSize, source };
+    if (turns?.length) row.turns = turns;
+    const { data, error } = await sb.from('saved_games').insert(row).select().single();
     if (error) throw error;
     return data;
   },

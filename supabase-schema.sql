@@ -132,6 +132,23 @@ alter table public.tsumego_problems enable row level security;
 create policy "Problems: read for authenticated" on public.tsumego_problems
   for select using (auth.role() = 'authenticated');
 
+-- ── Migrations (run after initial schema creation) ───────────────────────
+-- These columns were added after the initial deploy. Run in Supabase SQL Editor
+-- if self-hosting from this schema file.
+--
+--   ALTER TABLE public.saved_games ADD COLUMN IF NOT EXISTS ai_summary JSONB;
+--   ALTER TABLE public.saved_games ADD COLUMN IF NOT EXISTS turns JSONB;
+--
+-- ai_summary: Claude's post-game narrative. Schema:
+--   { overallComment, keyMoments, studyTopic, studyKeyword, errorTags }
+--   Written by game-summary.js after first successful review. Read by
+--   analyze-patterns.js to aggregate error patterns across games.
+--
+-- turns: Per-move winrate data collected during live play. Schema:
+--   [{ turnNumber, winrate, scoreLead }, ...]  (winrate from Black's perspective)
+--   Written by play.html at game-save time from katago-move.js responses.
+--   Lets the review page render the winrate chart without re-running KataGo.
+
 -- ── Spaced Repetition Schedule ────────────────────────────────────────────
 -- One row per (user, problem). Tracks SM-2 state for adaptive review scheduling.
 -- When a problem is first attempted, a row is inserted here.

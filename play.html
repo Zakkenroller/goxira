@@ -394,6 +394,7 @@
     let engineRetrySnapshot = null;
     let handicapStones    = []; // GTP coordinate strings for Black's pre-placed handicap stones
     let humanSLEnabled    = false; // true when katago-service has the human SL model loaded
+    let turnHistory       = []; // [{turnNumber, winrate, scoreLead}] collected from katago-move responses
 
     async function init() {
       const session = await Auth.getSession();
@@ -610,7 +611,7 @@
             try {
               const session = await Auth.getSession();
               if (session) {
-                const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play');
+                const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null);
                 savedGameId = saved?.id ?? null;
               }
             } catch(saveErr) { console.error('Save game on engine-down error:', saveErr); }
@@ -634,6 +635,12 @@
 
         const move = res.move;
         document.getElementById('claude-thinking').classList.remove('show');
+
+        // Record the winrate at the player's last move position for the chart cache.
+        // moveNumber at this point is the player's move count (before KataGo increments it below).
+        if (res.winrate != null) {
+          turnHistory.push({ turnNumber: moveNumber, winrate: res.winrate, scoreLead: res.scoreLead ?? null });
+        }
 
         if (move.col === -1 && move.row === -1) {
           consecutivePasses++;
@@ -700,7 +707,7 @@
           try {
             const session = await Auth.getSession();
             if (session) {
-              const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play');
+              const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null);
               savedGameId = saved?.id ?? null;
             }
           } catch(saveErr) { console.error('Save game on error:', saveErr); }
@@ -952,7 +959,7 @@
       }
 
       try {
-        const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play');
+        const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null);
         savedGameId = saved.id;
       } catch(e) { console.error('Save game error:', e); }
     }
