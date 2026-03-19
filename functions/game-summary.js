@@ -105,6 +105,7 @@ function formatTopMovesForPrompt(topMoves, toPlayWord) {
 }
 
 exports.handler = async (event) => {
+  const startTime = Date.now();
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -171,10 +172,12 @@ exports.handler = async (event) => {
       return `Move ${turn}: winrate dropped ${delta}% for ${toPlayWord}.${topMovesStr}`;
     }).join('\n\n');
 
-    // Claude has whatever time remains before Netlify's 26s hard limit.
-    // Add an explicit 6s timeout so we can degrade gracefully instead of being killed mid-response.
+    // Give Claude whatever time remains before Netlify's 26s hard limit (22s mark, 4s buffer).
+    // A fixed 6s was too short — Claude typically needs 5–12s for a 500-token JSON response.
+    const elapsed = Date.now() - startTime;
+    const claudeMs = Math.max(4000, 22000 - elapsed);
     const claudeTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Claude API timeout')), 6000)
+      setTimeout(() => reject(new Error('Claude API timeout')), claudeMs)
     );
     const claudeFetch = fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
