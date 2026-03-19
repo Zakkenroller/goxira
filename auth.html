@@ -296,7 +296,7 @@
   }
 
 Auth.onAuthChange(async (event, session) => {
-  if (event === 'SIGNED_IN' && session) {
+  if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
     location.href = '/home.html';
   }
 });
