@@ -4,6 +4,7 @@
   status = 200
 
 [build]
+  command = "bash generate-repo-export.sh"
   publish = "."
   functions = "functions"
 

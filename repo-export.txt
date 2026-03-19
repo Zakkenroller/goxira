@@ -531,8 +531,17 @@ const API = (() => {
     assess(messages, userContext) {
       return post('assess', { messages, userContext });
     },
-    generateProblem(rank, topic, boardSize) {
-      return post('problem', { rank, topic, boardSize });
+    generateProblem(rank, topic, boardSize, category, userId) {
+      return post('problem', { rank, topic, boardSize, category, userId });
+    },
+    updateSchedule(userId, problemId, solved, hintsUsed, attemptNumber) {
+      return post('update-schedule', { userId, problemId, solved, hintsUsed, attemptNumber });
+    },
+    josekiLookup(positionHash, category) {
+      return post('joseki-lookup', { positionHash, category });
+    },
+    josekiDeviation(moveSequence, deviationMove, boardSize, rank) {
+      return post('joseki-deviation', { moveSequence, deviationMove, boardSize, rank });
     },
     evaluateMove(problem, col, row, attemptNumber, rank) {
       return post('evaluate-move', { problem, col, row, attemptNumber, rank });
@@ -2649,6 +2658,72 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
   return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
 }
 
+// ── Pre-move full-board liberty analysis ──────────────────────────────────
+// Computes liberty counts for all groups on the board BEFORE the move is played.
+// Filters to contested groups (≤ 6 liberties) to give Claude grounded context
+// for distinguishing attack problems (Black killing White) from defense problems
+// (Black making eyes for its own group).
+
+function computePremoveContext(stones, toPlay, boardSize) {
+  const toPlayWord   = toPlay === 'B' ? 'Black' : 'White';
+  const opponentWord = toPlay === 'B' ? 'White' : 'Black';
+  const visited = new Set();
+  const contested = [];
+
+  for (const key of Object.keys(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 6) continue; // stable group — omit to reduce noise
+    const color = stones[key];
+    const colorWord = color === toPlay ? toPlayWord : opponentWord;
+    const stoneCoords = [...group].map(k => {
+      const [gc, gr] = k.split(',').map(Number);
+      return toGoNotation(gc, gr, boardSize);
+    }).sort().join(', ');
+    const libCoords = [...libs].map(k => {
+      const [lc, lr] = k.split(',').map(Number);
+      return toGoNotation(lc, lr, boardSize);
+    }).sort().join(', ');
+    contested.push(
+      `${colorWord} group [${stoneCoords}]: ${libs.size} libert${libs.size === 1 ? 'y' : 'ies'} (${libCoords})`
+    );
+  }
+
+  return contested.length
+    ? `Pre-move contested groups:\n${contested.join('\n')}`
+    : '';
+}
+
+// Returns 'attack' if the solution fills a liberty of a low-liberty opponent group,
+// 'defense' if it expands a low-liberty to-play group, or 'unknown'.
+function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
+  const opponent = toPlay === 'B' ? 'W' : 'B';
+  const solutionKey = `${solutionCol},${solutionRow}`;
+  const visited = new Set();
+
+  for (const [key, color] of Object.entries(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 6) continue; // match computePremoveContext threshold
+
+    if (color === opponent && libs.has(solutionKey)) return 'attack';
+    if (color === toPlay) {
+      const adj = [
+        [solutionCol - 1, solutionRow], [solutionCol + 1, solutionRow],
+        [solutionCol, solutionRow - 1], [solutionCol, solutionRow + 1],
+      ];
+      if (adj.some(([ac, ar]) => group.has(`${ac},${ar}`))) return 'defense';
+    }
+  }
+  return 'unknown';
+}
+
 // ── KataGo: top-5 position evaluation ────────────────────────────────────
 // Returns { winrate, scoreLead, bestMove, topMoves } or null if KataGo unavailable.
 async function katagoEval(initialStones, playerMove, boardSize) {
@@ -2668,6 +2743,41 @@ async function katagoEval(initialStones, playerMove, boardSize) {
     console.error('KataGo eval error:', e.message);
     return null;
   }
+}
+
+// Format KataGo ownership map into explicit territory facts for the Claude prompt.
+// Focuses on intersections occupied by problem stones and their immediate neighbors,
+// since those are what life/death commentary is actually about.
+// ownershipMap: { "D5": 0.94, "E5": -0.87, ... } (positive = Black, negative = White)
+// setupStones: { "col,row": "B"|"W" }
+function formatOwnershipFacts(ownershipMap, setupStones, boardSize) {
+  if (!ownershipMap || !setupStones) return '';
+
+  // Collect GTP positions of all problem stones and their adjacent intersections.
+  const relevant = new Set();
+  for (const key of Object.keys(setupStones)) {
+    const [c, r] = key.split(',').map(Number);
+    const gtp = GOCOLS[c] + (boardSize - r);
+    relevant.add(gtp);
+    for (const [nc, nr] of [[c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]]) {
+      if (nc >= 0 && nc < boardSize && nr >= 0 && nr < boardSize) {
+        relevant.add(GOCOLS[nc] + (boardSize - nr));
+      }
+    }
+  }
+
+  const THRESHOLD = 0.7; // |value| > 0.7 = clearly owned
+  const facts = [];
+  for (const gtp of [...relevant].sort()) {
+    const value = ownershipMap[gtp];
+    if (value === undefined || Math.abs(value) < THRESHOLD) continue;
+    const owner = value > 0 ? 'Black' : 'White';
+    const pct = Math.round(Math.abs(value) * 100);
+    facts.push(`${gtp}: ${owner} (${pct}%)`);
+  }
+
+  if (!facts.length) return '';
+  return `KataGo territory ownership after move (>70% = clearly owned; positive = Black, negative = White):\n${facts.join(', ')}`;
 }
 
 function formatTopMoves(topMoves, studentMove, toPlayWord) {
@@ -2715,6 +2825,19 @@ exports.handler = async (event) => {
     const studentFactsStr = tacticalFactsString(studentFacts, studentMove, toPlayWord, opponentWord);
     const correctFactsStr = tacticalFactsString(correctFacts, correctMove, toPlayWord, opponentWord);
 
+    // ── Pre-move liberty analysis: determines attack vs. defense role ──
+    const premoveContext = computePremoveContext(setupStones, toPlay, boardSize);
+    const problemRole    = inferProblemRole(
+      setupStones, toPlay,
+      problem.solution.move[0], problem.solution.move[1],
+      boardSize
+    );
+    const roleLabel = problemRole === 'attack'
+      ? `Problem role: ATTACK — ${toPlayWord} is killing the ${opponentWord} group. The solution reduces the ${opponentWord} group's liberties or eye space. Do NOT describe ${toPlayWord} as creating eyes for itself.`
+      : problemRole === 'defense'
+      ? `Problem role: DEFENSE — ${toPlayWord} is securing eye space for its own group. The solution helps ${toPlayWord} live.`
+      : '';
+
     // ── KataGo: top 5 candidate moves with principal variations ──
     const katagoStones = stonesToKataGo(setupStones, boardSize);
     const katago       = await katagoEval(katagoStones, [toPlay, studentMove], boardSize);
@@ -2741,6 +2864,21 @@ exports.handler = async (event) => {
     let katagoContext = '';
     let systemPreamble = '';
 
+    // Problem-type-specific vocabulary and constraints
+    const problemTopic = problem.topic || 'life_death';
+    const problemTypeSection = problemTopic === 'life_death'
+      ? `PROBLEM TYPE: LIFE AND DEATH (tsumego)
+This is a closed local problem about group survival. Commentary rules:
+- Use life/death vocabulary exclusively: eye space, two eyes, false eye, vital point, ko, seki, miai, liberties.
+- Explain the move in terms of how it creates or prevents eyes, or how it reduces/expands the group's liberty count.
+- NEVER use territory, fuseki, invasion, or large-scale strategic language. This is a local life/death fight.
+- Say "point" or "intersection" — NEVER "square". Go is played on intersections.
+- Say "stone" — NEVER "piece".`
+      : problemTopic === 'tesuji'
+      ? `PROBLEM TYPE: TESUJI
+Focus on the specific technique demonstrated (ladder, snapback, squeeze, etc.). Name the tesuji.`
+      : `PROBLEM TYPE: ${problemTopic.toUpperCase()}`;
+
     if (katago) {
       const winPct   = Math.round((katago.winrate ?? 0.5) * 100);
       const scoreStr = katago.scoreLead != null
@@ -2751,7 +2889,8 @@ exports.handler = async (event) => {
       const studentRank = katago.topMoves?.findIndex(m => m.move === studentMove) ?? -1;
       const rankStr = studentRank >= 0 ? ` Student's move ranks #${studentRank + 1} of KataGo's top 5.` : '';
 
-      katagoContext = `\nKataGo evaluation after student's move: ${winPct}% for ${toPlayWord}${scoreStr}.${rankStr}\n${topMovesStr}`;
+      const ownershipFacts = formatOwnershipFacts(katago.ownershipMap, setupStones, boardSize);
+      katagoContext = `\nKataGo evaluation after student's move: ${winPct}% for ${toPlayWord}${scoreStr}.${rankStr}\n${topMovesStr}${ownershipFacts ? `\n${ownershipFacts}` : ''}`;
 
       systemPreamble = `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
 GROUNDING RULES:
@@ -2759,12 +2898,17 @@ GROUNDING RULES:
 - Do NOT invent variations, sequences, or moves not in KataGo's top-5 list.
 - Do NOT estimate or fabricate win rates. Use KataGo's numbers exactly.
 - The "Verified tactical facts" section is computed by a deterministic rules engine (captures, atari, liberties). These are ground truth. Use them.
-- If the data doesn't cover something, say so honestly. Saying less is always better than fabricating.`;
+- The "KataGo territory ownership" section provides pre-computed ownership per intersection. Use it to ground life/death claims: a stone with >70% ownership by the opponent's color is expected to be dead or captured. Do NOT claim a group is alive or dead unless the ownership data supports it.
+- If the data doesn't cover something, say so honestly. Saying less is always better than fabricating.
+
+${problemTypeSection}`;
     } else {
       systemPreamble = `You are a Go tutor evaluating a student's tsumego attempt. Be concise (under 80 words) and honest. No markdown.
 KataGo engine data is not available for this position. You may ONLY reference the verified tactical facts below (captures, atari). Do NOT estimate whether this move is strategically good or bad. Do NOT invent win rates or suggest alternative moves. You can describe what the move physically does on the board and nothing more.
 If the verified facts show "no immediate captures or atari" for the correct move, you may only confirm the move is correct and state that its strategic value requires engine data to explain.
-The "Verified tactical facts" section is computed by a deterministic rules engine and is ground truth.`;
+The "Verified tactical facts" section is computed by a deterministic rules engine and is ground truth.
+
+${problemTypeSection}`;
     }
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -2780,22 +2924,23 @@ The "Verified tactical facts" section is computed by a deterministic rules engin
         system: `${systemPreamble}
 
 TEACHING CALIBRATION:
-- 25k–15k: Simple language. Focus on what happened tactically (captures, escapes). One concept at a time.
-- 15k–5k: Introduce strategic reasoning. Explain why a move is directionally wrong. Reference shapes and patterns by name.
-- 5k–1d+: Full strategic discussion. Discuss aji, thickness, direction of play. Reference joseki and fuseki concepts where relevant.
+- 25k–15k: Simple language. Focus on what happened (captures, atari, eye creation). One concept at a time.
+- 15k–5k: Name the tactical concept. For life/death: explain vital points and eye-making/destroying moves.
+- 5k–1d+: Full tactical depth. For life/death: discuss miai, ko threats, seki, false eyes. For other types: discuss aji, thickness, direction of play.
 
 RESPONSE STYLE (be concise, under 80 words):
 Attempt 1 wrong → Socratic hint toward the key tactical concept. Do not reveal the answer coordinate.
 Attempt 2 wrong → More direct hint using the verified facts about the correct move.
 Attempt 3+ wrong → State the correct answer and explain it using only the verified facts.
-Correct → Confirm using the verified facts for why the move works.`,
+Correct → If verified facts show captures or atari: state them precisely and explain what they mean for the group's survival. If verified facts show no captures or atari: state the move is correct and that it occupies the vital point. STOP THERE. Do NOT add speculative claims about what the opponent "might" do, "options", "ability", or probabilistic outcomes. When the data is indirect, say less — do not pad with inferences you cannot verify.`,
         messages: [{
           role: 'user',
-          content: `Problem: ${problem.description}
+          content: `Problem type: ${problemTopic}. Problem: ${problem.description}
 Student rank: ${rank}. Attempt #${attemptNumber}.
 Student played: ${studentMove}. Correct answer: ${correctMove}.
 Move is ${isCorrect ? 'CORRECT' : 'INCORRECT'}.
-
+${roleLabel ? `\n${roleLabel}` : ''}
+${premoveContext ? `\n${premoveContext}\n` : ''}
 ${studentFactsStr}
 ${isCorrect ? '' : correctFactsStr}${katagoContext}`,
         }],
@@ -3122,7 +3267,12 @@ exports.handler = async (event) => {
       return `Move ${turn}: winrate dropped ${delta}% for ${toPlayWord}.${topMovesStr}`;
     }).join('\n\n');
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // Claude has whatever time remains before Netlify's 26s hard limit.
+    // Add an explicit 6s timeout so we can degrade gracefully instead of being killed mid-response.
+    const claudeTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Claude API timeout')), 6000)
+    );
+    const claudeFetch = fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3131,7 +3281,7 @@ exports.handler = async (event) => {
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 700,
+        max_tokens: 500,
         system: `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
 GROUNDING RULES:
 - Reference ONLY moves and evaluations present in the KataGo data provided below.
@@ -3153,19 +3303,41 @@ Atari, Ladder, Net, Snapback, Ko, KoFight, Seki, LifeAndDeath, Eye, FalseEye, Tw
 If none of these match, use the closest one.`,
         messages: [{
           role: 'user',
-          content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.\n\n${winrateSummaryStr}\n\n${momentPromptParts}\n\nSGF: ${sgf}`,
+          content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.\n\n${winrateSummaryStr}\n\n${momentPromptParts}`,
         }],
       }),
+    }).then(async res => {
+      const data = await res.json();
+      if (!res.ok) throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
+      return data;
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
+    let summary;
+    try {
+      const data = await Promise.race([claudeFetch, claudeTimeout]);
+      const raw   = data.content[0].text;
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
+      summary = JSON.parse(match[0]);
+    } catch (claudeErr) {
+      // Claude timed out or errored — return KataGo turns data so the winrate chart still renders.
+      // The user gets the chart without commentary rather than a total failure.
+      console.error('Claude commentary failed:', claudeErr.message);
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          summary: {
+            overallComment: 'Game commentary is temporarily unavailable, but your winrate chart is ready below.',
+            keyMoments: [],
+            studyTopic: null,
+            studyKeyword: null,
+            errorTags: [],
+          },
+          turns: katagoResult.turns,
+        }),
+      };
     }
-    const raw   = data.content[0].text;
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
-    const summary = JSON.parse(match[0]);
 
     // Tag each key moment with an error category and produce a flat errorTags array
     // for efficient pattern aggregation across games.
@@ -3185,6 +3357,271 @@ If none of these match, use the closest one.`,
 
     return { statusCode: 200, headers, body: JSON.stringify({ summary, turns: katagoResult.turns }) };
   } catch(e) {
+    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+  }
+};
+
+========================================
+FILE: ./functions/joseki-deviation.js
+========================================
+// Joseki deviation analysis.
+//
+// Called when a user plays off-book in the joseki explorer.
+// Flow:
+//   1. Reconstruct the board position from the move sequence played so far.
+//   2. Send the position + deviation move to KataGo /analyze-position for top-5 evaluation.
+//   3. Identify the expected (on-book) next move from the sequence.
+//   4. Compute point loss = (expected move's winrate) - (deviation move's winrate).
+//   5. Pass all of this to Claude to explain the structural inefficiency in human terms.
+//
+// Two-System Rule strictly enforced:
+//   - KataGo computes the point loss and best moves. Claude explains why.
+//   - If KataGo is unavailable, Claude responds with a generic disclaimer only.
+//   - Claude never generates move coordinates or evaluates positions independently.
+
+const CLAUDE_MODEL       = 'claude-haiku-4-5-20251001';
+const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
+const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
+
+const COLS = 'ABCDEFGHJKLMNOPQRST';
+
+function toGTP(col, row, boardSize) {
+  return COLS[col] + (boardSize - row);
+}
+
+// Convert { color, col, row } move array to KataGo initialStones + moves format.
+// Returns { initialStones: [["B","D4"],...], moves: [["B","D4"],...] }
+// We treat the full sequence as moves (not initialStones) so KataGo evaluates the
+// position after replaying them from an empty board.
+function buildKataGoPayload(moveSequence, boardSize) {
+  const moves = moveSequence.map(m => [m.color, toGTP(m.col, m.row, boardSize)]);
+  return { initialStones: [], moves, boardSize };
+}
+
+// Query KataGo for top-5 candidate moves at the position after moveSequence.
+// Returns { topMoves, rootWinrate, rootScoreLead } or null on failure.
+async function katagoAnalyzePosition(moveSequence, boardSize) {
+  if (!KATAGO_SERVICE_URL) return null;
+  const { initialStones, moves } = buildKataGoPayload(moveSequence, boardSize);
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), 10000));
+  try {
+    const fetchResult = fetch(`${KATAGO_SERVICE_URL}/analyze-position`, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${KATAGO_TOKEN}`,
+      },
+      body: JSON.stringify({ initialStones, moves, boardSize }),
+    }).then(r => r.ok ? r.json() : null).catch(() => null);
+    return await Promise.race([fetchResult, timeout]);
+  } catch(e) {
+    console.error('KataGo joseki-deviation error:', e.message);
+    return null;
+  }
+}
+
+// Format top-5 for Claude's prompt.
+function formatTopMoves(topMoves, nextColor) {
+  if (!topMoves?.length) return '';
+  const label = nextColor === 'B' ? 'Black' : 'White';
+  const lines = topMoves.map((m, i) => {
+    const winPct = Math.round((m.winrate ?? 0) * 100);
+    const score  = m.scoreLead != null ? `, score ${m.scoreLead > 0 ? '+' : ''}${m.scoreLead.toFixed(1)}` : '';
+    const pv     = m.pv?.length ? ` (sequence: ${m.pv.slice(0, 5).join(', ')})` : '';
+    return `  ${i + 1}. ${m.move}: ${winPct}% for ${label}${score}${pv}`;
+  });
+  return `KataGo top-5 candidate moves at this position:\n${lines.join('\n')}`;
+}
+
+exports.handler = async (event) => {
+  const headers = {
+    'Access-Control-Allow-Origin':  '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type':                 'application/json',
+  };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  try {
+    const { moveSequence, deviationMove, boardSize = 19, rank = '20 kyu' } = JSON.parse(event.body || '{}');
+
+    if (!moveSequence || !deviationMove) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'moveSequence and deviationMove required' }) };
+    }
+
+    // The deviation move is the user's off-book choice.
+    // The expected next move would have been the first move in the remainder of
+    // the pattern — but at this point the client has already sent us the deviation.
+    // We evaluate the position *after* moveSequence (the on-book position) to get
+    // KataGo's assessment of what should have been played.
+    const katago = await katagoAnalyzePosition(moveSequence, boardSize);
+
+    const deviationGTP = toGTP(deviationMove.col, deviationMove.row, boardSize);
+    const nextColor    = deviationMove.color || (moveSequence.length % 2 === 0 ? 'B' : 'W');
+    const colorWord    = nextColor === 'B' ? 'Black' : 'White';
+
+    // ── Degraded path: KataGo unavailable ────────────────────────────
+    if (!katago) {
+      const explanation = `The engine is currently unavailable, so a precise point-loss calculation cannot be provided.
+
+In general, deviating from joseki risks one or more of: poor shape (e.g., empty triangles), wasted moves that don't match the direction of thickness, or allowing the opponent to establish a stronger local position. To understand the specific cost here, review this position with KataGo when available.`;
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ explanation, pointLoss: null, engineAvailable: false }),
+      };
+    }
+
+    // ── Compute point loss ────────────────────────────────────────────
+    // Best move's winrate (index 0) vs deviation move's winrate (if in top-5)
+    const bestMove    = katago.topMoves?.[0];
+    const bestWinrate = bestMove?.winrate ?? katago.rootWinrate ?? 0.5;
+
+    const deviationInTop = katago.topMoves?.find(m => m.move === deviationGTP);
+    const deviationWinrate = deviationInTop?.winrate;
+
+    // Point loss from score lead perspective (more precise than winrate diff)
+    const bestScore      = bestMove?.scoreLead ?? katago.rootScoreLead ?? 0;
+    const deviationScore = deviationInTop?.scoreLead;
+    const pointLoss      = deviationScore != null
+      ? Math.abs(bestScore - deviationScore)
+      : null;
+
+    const topMovesStr = formatTopMoves(katago.topMoves, nextColor);
+    const deviationRankStr = deviationInTop
+      ? `The deviation move (${deviationGTP}) ranks #${katago.topMoves.indexOf(deviationInTop) + 1} in KataGo's top 5.`
+      : `The deviation move (${deviationGTP}) is not in KataGo's top 5.`;
+
+    const pointLossStr = pointLoss != null
+      ? `Estimated point loss versus KataGo's best move: ~${pointLoss.toFixed(1)} points.`
+      : `KataGo best move winrate: ${Math.round(bestWinrate * 100)}% for ${colorWord}.`;
+
+    // ── Claude explanation ────────────────────────────────────────────
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:  'POST',
+      headers: {
+        'Content-Type':       'application/json',
+        'x-api-key':          process.env.ANTHROPIC_API_KEY,
+        'anthropic-version':  '2023-06-01',
+      },
+      body: JSON.stringify({
+        model:      CLAUDE_MODEL,
+        max_tokens: 200,
+        system: `You are a Go teacher explaining a joseki deviation to a student ranked ${rank}.
+KataGo has evaluated the position and provided the data below. Your job is to explain WHY the deviation is suboptimal using structural Go concepts.
+
+GROUNDING RULES (strictly enforced):
+- Reference ONLY moves and evaluations present in the KataGo data below.
+- Do NOT invent point losses, win rates, or continuations not present in the data.
+- Use KataGo's numbers exactly. Do not estimate or round beyond what is given.
+- You may name structural patterns (Empty Triangle, overconcentration, bad aji, premature contact) ONLY when the position actually demonstrates them — do not apply pattern names speculatively.
+- Keep your explanation under 80 words. No markdown.
+
+TEACHING CALIBRATION:
+- 25k–15k: Focus on the immediate shape consequence (e.g., "this wastes a stone" or "this gives up the corner").
+- 15k–5k: Explain the structural concept (e.g., "this creates an empty triangle, reducing your stone efficiency").
+- 5k–1d+: Discuss aji, direction of play, and long-term implications.`,
+        messages: [{
+          role:    'user',
+          content: `${colorWord} deviated from joseki by playing at ${deviationGTP}.
+${deviationRankStr}
+${pointLossStr}
+
+${topMovesStr}
+
+Explain why this deviation is suboptimal, grounded only in the KataGo data above.`,
+        }],
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Claude API error ${res.status}`);
+    const data        = await res.json();
+    const explanation = data.content[0].text;
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ explanation, pointLoss, engineAvailable: true }),
+    };
+
+  } catch(e) {
+    console.error('joseki-deviation error:', e);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+  }
+};
+
+========================================
+FILE: ./functions/joseki-lookup.js
+========================================
+// Joseki/Fuseki dictionary lookup.
+//
+// Two modes:
+//   1. { category }                    → list root-level patterns for the given category
+//   2. { positionHash }                → find patterns matching a specific position state
+//   3. { parentHash, category }        → list continuations from a given position
+//
+// The opening_patterns table stores individual named sequences.
+// Each row has:
+//   moves        jsonb  — ordered array [{ color, x, y }, ...]
+//   position_hash text  — stable hash of the move sequence for fast keyed lookup
+//
+// A "position hash" is computed client-side as the SHA-256 of the canonical
+// sorted move list (color+coord pairs, sorted so board rotations/reflections
+// are treated as distinct — intentional; joseki is corner-specific).
+//
+// This function returns up to 20 matching patterns ordered by difficulty.
+
+const SUPABASE_URL      = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+exports.handler = async (event) => {
+  const headers = {
+    'Access-Control-Allow-Origin':  '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type':                 'application/json',
+  };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  try {
+    const { positionHash, category, limit = 20 } = JSON.parse(event.body || '{}');
+
+    const url = new URL(`${SUPABASE_URL}/rest/v1/opening_patterns`);
+
+    if (positionHash) {
+      // Exact position lookup — find patterns whose move sequence produces this hash
+      url.searchParams.set('position_hash', `eq.${positionHash}`);
+    } else if (category) {
+      // Browse by category — return root patterns (fewest moves first)
+      url.searchParams.set('category', `eq.${category}`);
+      url.searchParams.set('order', 'difficulty.asc,name.asc');
+    } else {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: 'positionHash or category required' }),
+      };
+    }
+
+    url.searchParams.set('select', 'id,name,category,corner,difficulty,moves,position_hash,description,result,tags');
+    url.searchParams.set('limit',  String(Math.min(Number(limit), 50)));
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        'apikey':        SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+
+    if (!res.ok) throw new Error(`Supabase error ${res.status}`);
+    const patterns = await res.json();
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ patterns }),
+    };
+  } catch (e) {
+    console.error('joseki-lookup error:', e);
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
   }
 };
@@ -3376,24 +3813,100 @@ function boardRegion(col, row, boardSize) {
   return `${vert}-${horiz}`;
 }
 
-async function fetchProblemFromDB(difficulty) {
-  const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/tsumego_problems`);
-  url.searchParams.set('difficulty', `eq.${difficulty}`);
-  url.searchParams.set('select', 'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row');
-  url.searchParams.set('limit', '1');
+async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
+  const base = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  // If a logged-in user is requesting, try to serve an SRS-due problem first.
+  // A problem is "due" when next_review_date <= today.
+  if (userId) {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const schedUrl = new URL(`${base}/rest/v1/problem_schedule`);
+      schedUrl.searchParams.set('user_id',          `eq.${userId}`);
+      schedUrl.searchParams.set('next_review_date', `lte.${today}`);
+      schedUrl.searchParams.set('order',            'next_review_date.asc');
+      schedUrl.searchParams.set('limit',            '20'); // fetch a batch, pick one matching difficulty
+      schedUrl.searchParams.set('select',           'problem_id');
+
+      const schedRes = await fetch(schedUrl.toString(), {
+        headers: {
+          'apikey':        anonKey,
+          'Authorization': authHeader || `Bearer ${anonKey}`,
+        },
+      });
+
+      if (schedRes.ok) {
+        const due = await schedRes.json();
+        // Extract raw UUIDs (strip 'db_' prefix)
+        const uuids = due
+          .map(r => r.problem_id.replace(/^db_/, ''))
+          .filter(id => /^[0-9a-f-]{36}$/.test(id));
+
+        if (uuids.length) {
+          // Fetch the actual problems for these IDs and filter by difficulty + category
+          const inFilter = uuids.map(id => `"${id}"`).join(',');
+          const pUrl = new URL(`${base}/rest/v1/tsumego_problems`);
+          pUrl.searchParams.set('id',        `in.(${uuids.join(',')})`);
+          pUrl.searchParams.set('difficulty', `eq.${difficulty}`);
+          if (category) pUrl.searchParams.set('category', `eq.${category}`);
+          pUrl.searchParams.set('select',    'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row,category');
+          pUrl.searchParams.set('limit',     '1');
+
+          const pRes = await fetch(pUrl.toString(), {
+            headers: { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` },
+          });
+          if (pRes.ok) {
+            const pRows = await pRes.json();
+            if (pRows.length) return pRows[0]; // SRS hit
+          }
+        }
+      }
+    } catch (e) {
+      // SRS lookup failure is non-fatal — fall through to random selection
+      console.warn('SRS lookup failed, falling back to random:', e.message);
+    }
+  }
+
+  // Helper: fetch with a given offset, returns rows array (may be empty).
+  const dbHeaders = { 'apikey': anonKey, 'Authorization': `Bearer ${anonKey}` };
+  async function tryFetch(extraParams = {}) {
+    const url = new URL(`${base}/rest/v1/tsumego_problems`);
+    url.searchParams.set('difficulty', `eq.${difficulty}`);
+    if (category) url.searchParams.set('category', `eq.${category}`);
+    url.searchParams.set('select', 'id,source,difficulty,board_size,to_play,stones,solution_col,solution_row,category');
+    url.searchParams.set('limit', '1');
+    for (const [k, v] of Object.entries(extraParams)) url.searchParams.set(k, v);
+    const r = await fetch(url.toString(), { headers: dbHeaders });
+    if (!r.ok) return null; // signal error (e.g. column doesn't exist)
+    return r.json();
+  }
+
   const offset = Math.floor(Math.random() * 300);
-  url.searchParams.set('offset', String(offset));
+  let rows = await tryFetch({ offset: String(offset) });
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      'apikey': process.env.SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
-    },
-  });
+  // Supabase returned an error (e.g. the category column doesn't exist yet) — drop the
+  // category filter and re-query without it so the page at least serves problems.
+  if (rows === null && category) {
+    category = null;
+    rows = await tryFetch({ offset: String(offset) });
+    if (rows === null) throw new Error('Supabase error fetching problems');
+  }
 
-  if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
-  const rows = await res.json();
-  if (!rows.length) throw new Error('No problems found for difficulty ' + difficulty);
+  // Random offset overshot the available rows — retry from offset 0.
+  if (rows !== null && !rows.length && offset > 0) {
+    rows = await tryFetch({ offset: '0' });
+  }
+
+  // Category filter returned zero problems (e.g. all problems are still tagged life_death).
+  // Fall back to all categories so the user at least gets a problem.
+  if (!rows.length && category) {
+    category = null;
+    rows = await tryFetch({ offset: String(Math.floor(Math.random() * 300)) });
+    if (!rows.length) rows = await tryFetch({ offset: '0' });
+  }
+
+  if (!rows || !rows.length) throw new Error('No problems found for difficulty ' + difficulty);
   return rows[0];
 }
 
@@ -3487,8 +4000,73 @@ function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
   return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
 }
 
+// ── Pre-move full-board liberty analysis ──────────────────────────────────
+// Computes liberty counts for all groups on the board BEFORE the move is played.
+// Filters to contested groups (≤ 6 liberties) to give Claude grounded context
+// for distinguishing attack from defense problems.
+
+function computePremoveContext(stones, toPlay, boardSize) {
+  const toPlayWord   = toPlay === 'B' ? 'Black' : 'White';
+  const opponentWord = toPlay === 'B' ? 'White' : 'Black';
+  const visited = new Set();
+  const contested = [];
+
+  for (const key of Object.keys(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 6) continue;
+    const color = stones[key];
+    const colorWord = color === toPlay ? toPlayWord : opponentWord;
+    const stoneCoords = [...group].map(k => {
+      const [gc, gr] = k.split(',').map(Number);
+      return toGoNotation(gc, gr, boardSize);
+    }).sort().join(', ');
+    const libCoords = [...libs].map(k => {
+      const [lc, lr] = k.split(',').map(Number);
+      return toGoNotation(lc, lr, boardSize);
+    }).sort().join(', ');
+    contested.push(
+      `${colorWord} group [${stoneCoords}]: ${libs.size} libert${libs.size === 1 ? 'y' : 'ies'} (${libCoords})`
+    );
+  }
+
+  return contested.length
+    ? `Pre-move contested groups:\n${contested.join('\n')}`
+    : '';
+}
+
+// Returns 'attack' if the solution fills a liberty of a low-liberty opponent group,
+// 'defense' if adjacent to a low-liberty to-play group, or 'unknown'.
+function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
+  const opponent = toPlay === 'B' ? 'W' : 'B';
+  const solutionKey = `${solutionCol},${solutionRow}`;
+  const visited = new Set();
+
+  for (const [key, color] of Object.entries(stones)) {
+    if (visited.has(key)) continue;
+    const [c, r] = key.split(',').map(Number);
+    const group = getGroup(stones, c, r);
+    for (const k of group) visited.add(k);
+    const libs = getLiberties(stones, group, boardSize);
+    if (libs.size > 6) continue; // match computePremoveContext threshold
+
+    if (color === opponent && libs.has(solutionKey)) return 'attack';
+    if (color === toPlay) {
+      const adj = [
+        [solutionCol - 1, solutionRow], [solutionCol + 1, solutionRow],
+        [solutionCol, solutionRow - 1], [solutionCol, solutionRow + 1],
+      ];
+      if (adj.some(([ac, ar]) => group.has(`${ac},${ar}`))) return 'defense';
+    }
+  }
+  return 'unknown';
+}
+
 async function enrichWithText(problem, rank) {
-  const { board_size, to_play, stones, solution_col, solution_row } = problem;
+  const { board_size, to_play, stones, solution_col, solution_row, category } = problem;
 
   const toPlayWord   = to_play === 'B' ? 'Black' : 'White';
   const opponentWord = to_play === 'B' ? 'White' : 'Black';
@@ -3498,6 +4076,27 @@ async function enrichWithText(problem, rank) {
   // Compute verified tactical facts for the solution move
   const facts      = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
   const factsStr   = tacticalFactsString(facts, solutionNote, toPlayWord, opponentWord);
+
+  // Pre-move liberty analysis: determines whether this is an attack or defense problem
+  const premoveContext = computePremoveContext(stones, to_play, board_size);
+  const problemRole    = inferProblemRole(stones, to_play, solution_col, solution_row, board_size);
+  const roleLabel = problemRole === 'attack'
+    ? `Problem role: ATTACK — ${toPlayWord} is killing the ${opponentWord} group. Describe the task as preventing the ${opponentWord} group from forming two eyes, NOT as ${toPlayWord} creating eyes for itself.`
+    : problemRole === 'defense'
+    ? `Problem role: DEFENSE — ${toPlayWord} is securing eye space for its own group. Describe the task as ${toPlayWord} making two eyes or finding the vital point to live.`
+    : '';
+
+  // Problem-type vocabulary constraints
+  const problemCategory = category || 'life_death';
+  const categoryInstruction = problemCategory === 'life_death'
+    ? `PROBLEM TYPE: LIFE AND DEATH
+- The description must frame the task in life/death terms using the Problem role provided. For ATTACK: "find the vital point to kill White", "prevent White from forming two eyes". For DEFENSE: "find the move to live", "secure two eyes". NEVER use territory, invasion, or large-scale strategic language.
+- The hint must reference life/death concepts: eye space, vital point, two eyes, ko, miai, liberties.
+- The explanation must use life/death vocabulary. If the facts show an immediate capture or atari, explain what that does to the group's eye space or liberty count.
+- The "Pre-move contested groups" data is ground truth. Use it to identify which group is in danger and describe the problem accordingly.`
+    : problemCategory === 'tesuji'
+    ? `PROBLEM TYPE: TESUJI — The description and hint should name the tesuji technique if it is identifiable from the facts.`
+    : `PROBLEM TYPE: ${problemCategory.toUpperCase()}`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -3518,10 +4117,12 @@ Verified board facts are computed by a deterministic rules engine. They are grou
 - The explanation MUST be grounded in and consistent with the provided facts.
 - Do NOT add tactical claims beyond the facts (no invented liberty counts, alternative moves, or continuations).
 - The hint must guide toward the concept without giving away the coordinate.
-- Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.`,
+- Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.
+
+${categoryInstruction}`,
         messages: [{
           role: 'user',
-          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.\n\n${factsStr}`,
+          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
         }],
       }),
     });
@@ -3554,15 +4155,16 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   try {
-    const { rank } = JSON.parse(event.body);
+    const authHeader = event.headers['authorization'] || event.headers['Authorization'] || '';
+    const { rank, category, userId } = JSON.parse(event.body);
     const difficulty = rankToDifficulty(rank);
 
-    const row  = await fetchProblemFromDB(difficulty);
+    const row  = await fetchProblemFromDB(difficulty, category || null, userId || null, authHeader);
     const text = await enrichWithText(row, rank || '20 kyu');
 
     const problem = {
       id:          `db_${row.id}`,
-      topic:       'capture',
+      topic:       row.category || 'life_death',
       difficulty:  row.difficulty,
       boardSize:   row.board_size,
       description: text.description,
@@ -3585,6 +4187,422 @@ exports.handler = async (event) => {
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
   }
 };
+
+========================================
+FILE: ./functions/update-schedule.js
+========================================
+// SM-2 spaced repetition schedule updater.
+// Called after each tsumego attempt to update the per-user-per-problem review schedule.
+//
+// SM-2 algorithm:
+//   quality: 0–5 (0–2 = fail, 3–5 = pass with increasing ease)
+//   ease_factor: starts 2.5, adjusted by (0.1 - (5-q)*(0.08 + (5-q)*0.02)), min 1.3
+//   interval:
+//     first correct  → 1 day
+//     second correct → 6 days
+//     subsequent     → round(prev_interval * ease_factor)
+//   on failure: reset interval to 1, keep ease_factor adjustment
+
+const SUPABASE_URL     = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+// Map attempt outcome to SM-2 quality score (0–5).
+// solved:        true/false
+// hintsUsed:     0, 1, 2+ (affects quality within solved=true band)
+// attemptNumber: 1-based total attempts before getting it right (or giving up)
+function qualityScore(solved, hintsUsed, attemptNumber) {
+  if (!solved) return 1; // failed — below threshold, triggers reset
+  if (hintsUsed === 0 && attemptNumber === 1) return 5; // perfect recall
+  if (hintsUsed === 0) return 4;                        // correct but not first try
+  if (hintsUsed === 1) return 3;                        // needed one hint
+  return 2; // technically solved but required heavy scaffolding (treated as borderline fail)
+}
+
+// SM-2 step: given current state and quality (0–5), return next state.
+function sm2Next(easeFactor, intervalDays, consecutiveCorrect, quality) {
+  // Clamp quality
+  const q = Math.max(0, Math.min(5, quality));
+
+  let newEase = easeFactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+  newEase = Math.max(1.3, Math.round(newEase * 100) / 100);
+
+  let newInterval;
+  let newConsecutive;
+
+  if (q < 3) {
+    // Failed: reset streak and interval, but keep (reduced) ease_factor
+    newInterval     = 1;
+    newConsecutive  = 0;
+  } else {
+    newConsecutive = consecutiveCorrect + 1;
+    if (newConsecutive === 1)      newInterval = 1;
+    else if (newConsecutive === 2) newInterval = 6;
+    else                           newInterval = Math.round(intervalDays * easeFactor);
+  }
+
+  const nextReviewDate = new Date();
+  nextReviewDate.setDate(nextReviewDate.getDate() + newInterval);
+  const nextReviewStr = nextReviewDate.toISOString().slice(0, 10); // YYYY-MM-DD
+
+  return {
+    ease_factor:          newEase,
+    interval_days:        newInterval,
+    consecutive_correct:  newConsecutive,
+    next_review_date:     nextReviewStr,
+    last_reviewed_at:     new Date().toISOString(),
+  };
+}
+
+async function getSchedule(userId, problemId, authHeader) {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/problem_schedule`);
+  url.searchParams.set('user_id',   `eq.${userId}`);
+  url.searchParams.set('problem_id', `eq.${problemId}`);
+  url.searchParams.set('select',    'id,ease_factor,interval_days,consecutive_correct');
+  url.searchParams.set('limit',     '1');
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      'apikey':        SUPABASE_ANON_KEY,
+      'Authorization': authHeader,
+    },
+  });
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows[0] || null;
+}
+
+async function upsertSchedule(userId, problemId, state, authHeader) {
+  const url = `${SUPABASE_URL}/rest/v1/problem_schedule`;
+  const body = {
+    user_id:             userId,
+    problem_id:          problemId,
+    ease_factor:         state.ease_factor,
+    interval_days:       state.interval_days,
+    consecutive_correct: state.consecutive_correct,
+    next_review_date:    state.next_review_date,
+    last_reviewed_at:    state.last_reviewed_at,
+  };
+
+  const res = await fetch(url, {
+    method:  'POST',
+    headers: {
+      'apikey':        SUPABASE_ANON_KEY,
+      'Authorization': authHeader,
+      'Content-Type':  'application/json',
+      'Prefer':        'resolution=merge-duplicates',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase upsert error ${res.status}: ${text}`);
+  }
+}
+
+exports.handler = async (event) => {
+  const headers = {
+    'Access-Control-Allow-Origin':  '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type':                 'application/json',
+  };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  try {
+    const authHeader = event.headers['authorization'] || event.headers['Authorization'] || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
+    }
+
+    const { userId, problemId, solved, hintsUsed, attemptNumber } = JSON.parse(event.body);
+    if (!userId || !problemId) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'userId and problemId required' }) };
+    }
+
+    const quality  = qualityScore(!!solved, hintsUsed || 0, attemptNumber || 1);
+    const existing = await getSchedule(userId, problemId, authHeader);
+
+    const currentState = existing || {
+      ease_factor:         2.5,
+      interval_days:       1,
+      consecutive_correct: 0,
+    };
+
+    const nextState = sm2Next(
+      currentState.ease_factor,
+      currentState.interval_days,
+      currentState.consecutive_correct,
+      quality,
+    );
+
+    await upsertSchedule(userId, problemId, nextState, authHeader);
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        quality,
+        nextReviewDate: nextState.next_review_date,
+        intervalDays:   nextState.interval_days,
+        easeFactor:     nextState.ease_factor,
+      }),
+    };
+  } catch (e) {
+    console.error('update-schedule error:', e);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+  }
+};
+
+========================================
+FILE: ./glossary.js
+========================================
+// Glossary — scans rendered text for known Go terms and wraps them in interactive tooltips.
+//
+// Usage:
+//   1. Include <script src="glossary.js"></script> on any page that renders Claude text.
+//   2. After inserting Claude's text into a DOM element, call: Glossary.wrap(element)
+//
+// Tooltips are injected inline as <abbr class="go-term" title="..."> elements.
+// A shared floating tooltip div provides richer display with a small popover.
+
+const Glossary = (() => {
+  let terms = null; // loaded lazily from glossary.json
+
+  // Load once, cache in module scope.
+  async function loadTerms() {
+    if (terms) return terms;
+    try {
+      const res = await fetch('/glossary.json');
+      terms = res.ok ? await res.json() : {};
+    } catch {
+      terms = {};
+    }
+    return terms;
+  }
+
+  // Build a regex that matches any known term (case-insensitive, whole word).
+  function buildPattern(termMap) {
+    const escaped = Object.keys(termMap)
+      .sort((a, b) => b.length - a.length) // longest first to avoid partial matches
+      .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    return new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
+  }
+
+  // Walk text nodes inside el and wrap recognized terms.
+  // Skips text inside <a>, <abbr>, <code>, <pre> elements.
+  function walkAndWrap(el, pattern, termMap) {
+    const SKIP_TAGS = new Set(['A', 'ABBR', 'CODE', 'PRE', 'SCRIPT', 'STYLE']);
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        let p = node.parentElement;
+        while (p && p !== el) {
+          if (SKIP_TAGS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
+          p = p.parentElement;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) textNodes.push(node);
+
+    for (const textNode of textNodes) {
+      const text = textNode.nodeValue;
+      if (!pattern.test(text)) { pattern.lastIndex = 0; continue; }
+      pattern.lastIndex = 0;
+
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      let m;
+      while ((m = pattern.exec(text)) !== null) {
+        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const abbr = document.createElement('abbr');
+        abbr.className = 'go-term';
+        abbr.textContent = m[0];
+        abbr.dataset.def = termMap[m[0]] || termMap[Object.keys(termMap).find(
+          k => k.toLowerCase() === m[0].toLowerCase()
+        )] || '';
+        frag.appendChild(abbr);
+        last = m.index + m[0].length;
+      }
+      pattern.lastIndex = 0;
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+
+      textNode.parentNode.replaceChild(frag, textNode);
+    }
+  }
+
+  // ── Tooltip overlay ──────────────────────────────────────────────────────
+  function ensureTooltip() {
+    let tip = document.getElementById('go-term-tooltip');
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.id = 'go-term-tooltip';
+      tip.style.cssText = [
+        'position:fixed',
+        'z-index:9999',
+        'max-width:280px',
+        'background:#1a1814',
+        'color:#f5f0e8',
+        'border-radius:8px',
+        'padding:0.6rem 0.85rem',
+        'font-size:0.8rem',
+        'line-height:1.5',
+        'box-shadow:0 4px 20px rgba(0,0,0,0.35)',
+        'pointer-events:none',
+        'opacity:0',
+        'transition:opacity 0.15s ease',
+        'word-break:break-word',
+      ].join(';');
+      document.body.appendChild(tip);
+    }
+    return tip;
+  }
+
+  function showTooltip(abbr) {
+    const tip = ensureTooltip();
+    const def = abbr.dataset.def;
+    if (!def) return;
+    const term = abbr.textContent;
+    tip.innerHTML = `<strong style="display:block;margin-bottom:0.2rem;font-size:0.75rem;letter-spacing:0.06em;text-transform:uppercase;opacity:0.55">${term}</strong>${def}`;
+
+    const rect = abbr.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Position below the term; flip above if not enough room
+    let top = rect.bottom + 6;
+    let left = Math.max(8, rect.left);
+
+    // Clamp horizontally
+    if (left + 288 > vw - 8) left = vw - 296;
+
+    // Flip above if tooltip would overflow viewport bottom
+    // (estimate tip height ~80px)
+    if (top + 80 > vh) top = rect.top - 86;
+
+    tip.style.top  = `${top}px`;
+    tip.style.left = `${left}px`;
+    tip.style.opacity = '1';
+  }
+
+  function hideTooltip() {
+    const tip = document.getElementById('go-term-tooltip');
+    if (tip) tip.style.opacity = '0';
+  }
+
+  // Delegate events on document for all .go-term elements.
+  function attachGlobalEvents() {
+    if (Glossary._eventsAttached) return;
+    Glossary._eventsAttached = true;
+
+    document.addEventListener('mouseover', e => {
+      if (e.target.classList && e.target.classList.contains('go-term')) showTooltip(e.target);
+    });
+    document.addEventListener('mouseout', e => {
+      if (e.target.classList && e.target.classList.contains('go-term')) hideTooltip();
+    });
+    // Touch: tap to show, tap elsewhere to hide
+    document.addEventListener('touchstart', e => {
+      const t = e.target;
+      if (t.classList && t.classList.contains('go-term')) {
+        e.preventDefault();
+        showTooltip(t);
+      } else {
+        hideTooltip();
+      }
+    }, { passive: false });
+  }
+
+  // ── Public API ───────────────────────────────────────────────────────────
+
+  // Wrap all recognized Go terms inside `el` with interactive tooltips.
+  // Safe to call multiple times — already-wrapped <abbr> nodes are skipped.
+  async function wrap(el) {
+    if (!el) return;
+    const termMap = await loadTerms();
+    if (!Object.keys(termMap).length) return;
+    const pattern = buildPattern(termMap);
+    walkAndWrap(el, pattern, termMap);
+    attachGlobalEvents();
+    injectStyles();
+  }
+
+  function injectStyles() {
+    if (document.getElementById('go-term-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'go-term-styles';
+    style.textContent = `
+      abbr.go-term {
+        text-decoration: underline dotted rgba(120,90,40,0.5);
+        text-underline-offset: 3px;
+        cursor: help;
+        border-bottom: none;
+        color: inherit;
+      }
+      abbr.go-term:hover {
+        text-decoration-color: rgba(120,90,40,0.9);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  return { wrap, _eventsAttached: false };
+})();
+
+window.Glossary = Glossary;
+
+========================================
+FILE: ./glossary.json
+========================================
+{
+  "Aji": "Latent potential in a position — stones or sequences that aren't active now but could become useful or threatening later.",
+  "Atari": "A threat to capture: a group has only one liberty remaining and will be captured on the next move unless it escapes or captures first.",
+  "Boshi": "A capping move placed directly above an opponent's stone, preventing it from extending toward the center and limiting its development.",
+  "Clamp": "A tesuji where a stone is placed between two opponent stones of the same color, forcing them apart or creating cutting threats.",
+  "Dame": "A neutral point adjacent to both players' territory, or a liberty of no strategic value. Often filled at the end of the game.",
+  "Dan": "The rank system for strong players above kyu: 1 dan (amateur) is strong, up to 9 dan (professional). Higher is stronger.",
+  "Double Ko": "A position with two simultaneous ko fights. Under normal ko rules, the player who first has to yield one ko loses the other.",
+  "Empty Triangle": "An inefficient shape where three stones of the same color form a triangle with an empty space at the middle, wasting one stone's potential.",
+  "Endgame": "The final phase of the game (yose) where both sides secure territory and fill neutral points. Precision here often determines the winner.",
+  "Fuseki": "The opening phase of a game on a full 19×19 board, before contact fighting begins. Strategy focuses on balance, framework, and direction.",
+  "Geta": "A net — a technique to capture a stone by surrounding it so it cannot escape in any direction, even though it isn't yet enclosed.",
+  "Gote": "A move that does not require an immediate response; the player playing gote loses the initiative (sente) to the opponent.",
+  "Hamete": "A trick play or trap that appears locally clever but is unsound against correct response. Often used to lure inexperienced players.",
+  "Hane": "A move that goes around the end of an opponent's line of stones, bending past their edge.",
+  "Hasami": "A pincer — a move that attacks an opponent's newly played stone by flanking it, preventing it from settling easily.",
+  "Influence": "Outward-facing power projected toward the center or open areas by a thick group, often more valuable than immediate territory.",
+  "Joseki": "Established locally optimal sequences in the corner or along the edge, considered fair for both sides when played correctly.",
+  "Keima": "A knight's move — a diagonal jump one step in one direction and two steps in another, like a chess knight. Used for quick development.",
+  "Ko": "A rule preventing immediate repetition of a board position. A single-stone capture that could be immediately recaptured must be delayed by playing elsewhere first.",
+  "Komi": "Points given to White to compensate for Black playing first. Standard komi on 19×19 is 6.5 or 7.5 points.",
+  "Kosumi": "A diagonal move: placing a stone diagonally adjacent to one of your own stones, typically to strengthen a corner or reduce liberties.",
+  "Kyu": "Rank below dan. 30 kyu is a complete beginner; 1 kyu is just below amateur dan level. Lower number = stronger.",
+  "Ladder": "A capture sequence (shicho) in which the attacker chases a stone in a zigzag pattern toward the edge of the board.",
+  "Liberty": "An empty intersection directly adjacent (not diagonal) to a stone or group. A group with zero liberties is captured.",
+  "Moyo": "A large framework or potential territory — an area loosely surrounded by a player's stones that may become actual territory if defended.",
+  "Net": "See Geta — surrounding a stone so it cannot escape even without directly enclosing it.",
+  "Nobi": "A solid extension — extending directly along a line by one step, often used to strengthen a group or connect stones.",
+  "Oba": "A large-scale urgent point in the opening or middle game that both players want to occupy — a \"big point\".",
+  "Peep": "Playing at a cutting point inside an opponent's shape to threaten to cut it apart, forcing a response.",
+  "Ponnuki": "The shape formed when four stones capture a single stone at the center. Considered a very efficient, powerful shape.",
+  "Sagari": "A descent — a move that drops down from a higher position to the edge or to a lower line, typically to secure territory or life.",
+  "Seki": "Mutual life — a position where neither player can capture the other without being captured first. Neither group is alive in the normal sense.",
+  "Sente": "Having the initiative: your move requires a response, so you retain the right to play next in another area.",
+  "Shimari": "A corner enclosure — two stones of the same color that together secure a corner and prevent easy invasion.",
+  "Shicho": "See Ladder.",
+  "Snapback": "A tesuji: after the opponent captures a stone, the resulting shape allows an immediate recapture of a larger group.",
+  "Squeeze": "A tesuji that reduces an opponent's liberties by playing inside their space, forcing them to capture and creating a ladder or net.",
+  "Suji": "Sound technique — a well-reasoned, structurally correct move as opposed to a crude or inefficient one.",
+  "Tengen": "The center point of the board (the 10-10 point on a 19×19). Occasionally played as an opening move for influence.",
+  "Tenuki": "Ignoring a local threat and playing elsewhere — a strategically bold move that says the global board position is more urgent.",
+  "Tesuji": "A clever tactical move that solves a local problem efficiently — often unexpected, exploiting a weakness in the opponent's shape.",
+  "Thickness": "A group that has no weaknesses and projects strong influence outward. Thick groups are not necessarily territory but are powerful.",
+  "Tsumego": "A life-and-death problem: a puzzle where you must determine whether a group can live or be killed, and find the correct move.",
+  "Vital Point": "The single most important point in a local position — often the point that, if occupied, either gives life or kills a group.",
+  "Yose": "See Endgame.",
+  "Zankai": "After a large-scale battle ends, residual threats or aji left in the settled area that may be activated later."
+}
 
 ========================================
 FILE: ./home.html
@@ -3779,10 +4797,11 @@ FILE: ./home.html
     </a>
     <div class="nav__links">
       <a href="problems.html" class="nav__link">Problems</a>
-      <a href="play.html" class="nav__link">Play</a>
-      <a href="review.html" class="nav__link">Review</a>
+      <a href="play.html"     class="nav__link">Play</a>
+      <a href="joseki.html"   class="nav__link">Joseki</a>
+      <a href="review.html"   class="nav__link">Review</a>
       <a href="progress.html" class="nav__link">Progress</a>
-      <a href="profile.html" class="nav__link">Profile</a>
+      <a href="profile.html"  class="nav__link">Profile</a>
     </div>
   </nav>
 
@@ -3841,6 +4860,12 @@ FILE: ./home.html
           <span class="action-card__icon">⚫</span>
           <p class="action-card__title">Play vs Claude</p>
           <p class="action-card__desc">Live game at your level</p>
+        </a>
+
+        <a href="joseki.html" class="action-card">
+          <span class="action-card__icon">囲</span>
+          <p class="action-card__title">Joseki</p>
+          <p class="action-card__desc">Opening pattern explorer</p>
         </a>
 
         <a href="review.html" class="action-card">
@@ -4325,6 +5350,572 @@ FILE: ./index.html
 </html>
 
 ========================================
+FILE: ./joseki.html
+========================================
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Joseki Dictionary — Goxira</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page-main { padding-top: 1.25rem; }
+
+    /* ── Category tabs ── */
+    .cat-tabs {
+      display: flex; gap: 0.4rem; margin-bottom: 1rem;
+    }
+    .cat-tab {
+      flex: 1; padding: 0.45rem 0.5rem;
+      font-size: 0.75rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      text-align: center; border-radius: 100px;
+      border: 1.5px solid var(--paper-deep);
+      background: white; color: var(--ink-faint);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .cat-tab.active {
+      background: var(--ink); color: var(--paper);
+      border-color: var(--ink);
+    }
+
+    /* ── Page layout ── */
+    .joseki-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+    @media (min-width: 700px) {
+      .joseki-layout { grid-template-columns: 260px 1fr; }
+    }
+
+    /* ── Pattern list (left panel) ── */
+    .pattern-list {
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .pattern-list-header {
+      font-size: 0.68rem; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--ink-faint);
+      margin-bottom: 0.25rem;
+    }
+    .pattern-card {
+      background: white;
+      border: 1.5px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.75rem 0.875rem;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .pattern-card:hover { background: var(--paper-warm); transform: translateX(2px); }
+    .pattern-card.active {
+      border-color: var(--ink); background: var(--paper-warm);
+    }
+    .pattern-card__name {
+      font-size: 0.875rem; font-weight: 500; color: var(--ink);
+    }
+    .pattern-card__meta {
+      font-size: 0.72rem; color: var(--ink-faint); margin-top: 0.15rem;
+    }
+    .pattern-card__tags {
+      display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem;
+    }
+    .tag-pill {
+      font-size: 0.65rem; padding: 0.1rem 0.45rem;
+      border-radius: 100px; background: var(--paper-deep);
+      color: var(--ink-faint);
+    }
+
+    /* ── Right panel ── */
+    .explorer-panel { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    /* ── Board ── */
+    .board-container {
+      background: var(--board);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    .board-container svg {
+      width: 100% !important; height: auto !important; display: block;
+    }
+    .board-loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--board); z-index: 10;
+    }
+
+    /* ── Navigation row ── */
+    .nav-row {
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .nav-row .btn { padding: 0.4rem 0.8rem; font-size: 0.82rem; }
+    .move-counter {
+      flex: 1; text-align: center;
+      font-size: 0.8rem; color: var(--ink-faint);
+    }
+
+    /* ── Info panel ── */
+    .info-box {
+      background: var(--paper-warm);
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      padding: 0.875rem 1rem;
+    }
+    .info-box__title {
+      font-family: var(--font-serif);
+      font-size: 1rem; font-weight: 600; color: var(--ink);
+      margin-bottom: 0.3rem;
+    }
+    .info-box__desc {
+      font-size: 0.875rem; line-height: 1.6; color: var(--ink-light);
+    }
+    .info-box__result {
+      margin-top: 0.5rem;
+      font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--ink-faint);
+    }
+
+    /* ── Deviation feedback ── */
+    .deviation-box {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--r-md);
+      padding: 0.875rem 1rem;
+      font-size: 0.875rem; line-height: 1.6;
+      color: var(--ink-light);
+      display: none;
+    }
+    .deviation-box.show { display: block; }
+    .deviation-box.error { border-left-color: var(--wrong); }
+
+    .deviation-header {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--accent);
+      margin-bottom: 0.4rem;
+    }
+    .deviation-box.error .deviation-header { color: var(--wrong); }
+
+    /* ── Category definition ── */
+    .cat-def {
+      font-size: 0.8rem; color: var(--ink-faint); line-height: 1.5;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center; padding: 3rem 1rem;
+      color: var(--ink-faint); font-size: 0.875rem;
+    }
+    .empty-state__icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+
+    /* ── Loading skeleton ── */
+    .skeleton-list {
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .skeleton-card {
+      height: 72px; border-radius: var(--r-md);
+      background: linear-gradient(90deg, var(--paper-deep) 25%, var(--paper-warm) 50%, var(--paper-deep) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top nav -->
+  <nav class="nav">
+    <a href="home.html" class="nav__logo">
+      <span class="nav__logo-stone"></span>
+      Goxira
+    </a>
+    <div class="nav__links">
+      <a href="problems.html" class="nav__link">Problems</a>
+      <a href="play.html"     class="nav__link">Play</a>
+      <a href="joseki.html"   class="nav__link active">Joseki</a>
+      <a href="review.html"   class="nav__link">Review</a>
+      <a href="progress.html" class="nav__link">Progress</a>
+      <a href="profile.html"  class="nav__link">Profile</a>
+    </div>
+  </nav>
+
+  <main class="page-main">
+    <div class="container">
+
+      <!-- Category tabs -->
+      <div class="cat-tabs">
+        <button class="cat-tab active" data-cat="joseki" onclick="selectCategory(this, 'joseki')">
+          Joseki
+        </button>
+        <button class="cat-tab" data-cat="fuseki" onclick="selectCategory(this, 'fuseki')">
+          Fuseki
+        </button>
+      </div>
+      <p class="cat-def" id="cat-def"></p>
+
+      <div class="joseki-layout">
+
+        <!-- Pattern list -->
+        <div>
+          <p class="pattern-list-header" id="list-header">Patterns</p>
+          <div class="pattern-list" id="pattern-list">
+            <div class="skeleton-list">
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Explorer panel -->
+        <div class="explorer-panel" id="explorer-panel">
+          <div class="empty-state">
+            <div class="empty-state__icon">囲</div>
+            <p>Select a pattern to explore it step by step.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom nav -->
+  <nav class="bottom-nav">
+    <div class="bottom-nav__item" onclick="location.href='home.html'">
+      <span class="bottom-nav__icon">⊞</span>Home
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='problems.html'">
+      <span class="bottom-nav__icon">🧩</span>Problems
+    </div>
+    <div class="bottom-nav__item active" onclick="location.href='joseki.html'">
+      <span class="bottom-nav__icon">囲</span>Joseki
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='play.html'">
+      <span class="bottom-nav__icon">⚫</span>Play
+    </div>
+    <div class="bottom-nav__item" onclick="location.href='review.html'">
+      <span class="bottom-nav__icon">🔍</span>Review
+    </div>
+  </nav>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+  <script>
+    window.GOTUTOR_CONFIG = {
+      supabaseUrl:     'https://humvrkmlvhzwoawoyslu.supabase.co',
+      supabaseAnonKey: 'sb_publishable_dEQVVToEQh35MPrBEtKkmQ_om0ty8-r',
+    };
+  </script>
+  <script src="supabase-client.js"></script>
+  <script src="api.js"></script>
+  <script src="board.js"></script>
+  <script src="glossary.js"></script>
+  <script>
+    const BOARD_SIZE = 19;
+    // Go column labels A–T, skipping I (standard notation)
+    const COL_LABELS = 'ABCDEFGHJKLMNOPQRST';
+
+    let currentCategory  = 'joseki';
+    let currentPattern   = null;
+    let currentMoveIndex = 0;  // how far through the pattern's moves we are
+    let board            = null;
+    let userId           = null;
+    let userRank         = '20 kyu';
+    let practiceMode     = false;  // true = board interactive (quiz mode)
+
+    const CAT_DEFS = {
+      joseki: 'Joseki: established corner sequences considered locally fair for both sides. Learning joseki helps you play efficient, sound moves in the corner.',
+      fuseki:  'Fuseki: the opening phase of a 19×19 game, before contact fighting begins. Strategy focuses on balance between territory, influence, and direction of play.',
+    };
+
+    function setCatDef(cat) {
+      const el = document.getElementById('cat-def');
+      if (el) el.textContent = CAT_DEFS[cat] || '';
+    }
+
+    // ── Init ────────────────────────────────────────────────────────
+    async function init() {
+      const session = await Auth.getSession();
+      if (!session) { location.href = 'auth.html'; return; }
+      userId = session.user.id;
+      const profile = await UserDB.getProfile(userId);
+      if (profile) userRank = profile.current_rank;
+      setCatDef('joseki');
+      await loadPatternList('joseki');
+    }
+
+    // ── Category selection ───────────────────────────────────────────
+    async function selectCategory(btn, cat) {
+      currentCategory = cat;
+      document.querySelectorAll('.cat-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      setCatDef(cat);
+      clearExplorer();
+      await loadPatternList(cat);
+    }
+
+    // ── Load pattern list ────────────────────────────────────────────
+    async function loadPatternList(category) {
+      const listEl = document.getElementById('pattern-list');
+      document.getElementById('list-header').textContent =
+        category === 'joseki' ? 'Corner Patterns' : 'Opening Lines';
+      listEl.innerHTML = `
+        <div class="skeleton-list">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>`;
+
+      try {
+        const { patterns } = await API.josekiLookup(null, category);
+
+        if (!patterns.length) {
+          listEl.innerHTML = `
+            <div class="empty-state" style="padding:1.5rem 0">
+              <p>No ${category === 'joseki' ? 'joseki' : 'fuseki'} patterns are available yet.</p>
+              <p style="margin-top:0.5rem;font-size:0.78rem">
+                Check back soon — patterns are being added to the library.
+              </p>
+            </div>`;
+          return;
+        }
+
+        listEl.innerHTML = '';
+        patterns.forEach(p => {
+          const card = document.createElement('div');
+          card.className = 'pattern-card';
+          const diffLabel = ['', 'Beginner', 'Intermediate', 'Advanced'][p.difficulty] || '';
+          const tags = (p.tags || []).map(t =>
+            `<span class="tag-pill">${escHtml(t)}</span>`
+          ).join('');
+          card.innerHTML = `
+            <p class="pattern-card__name">${escHtml(p.name)}</p>
+            <p class="pattern-card__meta">${diffLabel}${p.result ? ' · ' + escHtml(p.result) : ''}</p>
+            ${tags ? `<div class="pattern-card__tags">${tags}</div>` : ''}
+          `;
+          card.onclick = () => openPattern(p, card);
+          listEl.appendChild(card);
+        });
+
+      } catch(e) {
+        listEl.innerHTML = `<p style="font-size:0.82rem;color:var(--ink-faint)">Failed to load patterns: ${escHtml(e.message)}</p>`;
+      }
+    }
+
+    // ── Open a pattern ───────────────────────────────────────────────
+    function openPattern(pattern, cardEl) {
+      document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('active'));
+      if (cardEl) cardEl.classList.add('active');
+
+      currentPattern   = pattern;
+      currentMoveIndex = 0;
+      practiceMode     = false;
+      renderExplorer(pattern);
+    }
+
+    function renderExplorer(pattern) {
+      const panel = document.getElementById('explorer-panel');
+      panel.innerHTML = `
+        <div class="board-container" id="board-container">
+          <div class="board-loading" id="board-loading">
+            <span class="loader" style="width:32px;height:32px;border-width:3px;color:var(--board-dark)"></span>
+          </div>
+        </div>
+
+        <div class="nav-row">
+          <button class="btn btn--secondary" id="prev-btn" onclick="stepMove(-1)" disabled>← Prev</button>
+          <span class="move-counter" id="move-counter">Move 0 / ${(pattern.moves || []).length}</span>
+          <button class="btn btn--secondary" id="next-btn" onclick="stepMove(1)">Next →</button>
+          <button class="btn btn--secondary" id="practice-btn" onclick="togglePractice()" style="margin-left:0.25rem">Practice</button>
+        </div>
+        <p id="step-hint" style="font-size:0.78rem;color:var(--ink-faint);text-align:center;margin-top:-0.25rem">
+          Use Next → to step through the sequence.
+        </p>
+
+        <div class="info-box" id="info-box">
+          <p class="info-box__title">${escHtml(pattern.name)}</p>
+          <p class="info-box__desc" id="info-desc">${escHtml(pattern.description || 'Navigate through the moves to explore this pattern.')}</p>
+          ${pattern.result ? `<p class="info-box__result">Result: ${escHtml(pattern.result)}</p>` : ''}
+        </div>
+
+        <div class="deviation-box" id="deviation-box">
+          <p class="deviation-header" id="deviation-header">Deviation</p>
+          <div id="deviation-text"></div>
+        </div>
+      `;
+
+      // Init board
+      const container = document.getElementById('board-container');
+      board = Board.create(container, BOARD_SIZE, onUserMove);
+      document.getElementById('board-loading').style.display = 'none';
+
+      refreshBoardState();
+    }
+
+    // ── Practice mode toggle ─────────────────────────────────────────
+    function togglePractice() {
+      if (!currentPattern) return;
+      practiceMode = !practiceMode;
+      hideDeviation();
+      refreshBoardState();
+      const hint = document.getElementById('step-hint');
+      if (hint) hint.textContent = practiceMode
+        ? 'Click the board to play the next move in the sequence.'
+        : 'Use Next → to step through the sequence.';
+    }
+
+    function clearExplorer() {
+      currentPattern   = null;
+      currentMoveIndex = 0;
+      practiceMode     = false;
+      board            = null;
+      document.getElementById('explorer-panel').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state__icon">囲</div>
+          <p>Select a pattern to explore it step by step.</p>
+        </div>`;
+    }
+
+    // ── Step through moves ────────────────────────────────────────────
+    function stepMove(delta) {
+      if (!currentPattern) return;
+      const moves = currentPattern.moves || [];
+      const newIdx = Math.max(0, Math.min(moves.length, currentMoveIndex + delta));
+      if (newIdx === currentMoveIndex) return;
+      currentMoveIndex = newIdx;
+      refreshBoardState();
+      // Hide any deviation box on navigation
+      hideDeviation();
+    }
+
+    function refreshBoardState() {
+      if (!board || !currentPattern) return;
+      const moves = currentPattern.moves || [];
+
+      // Full replay from scratch
+      board.clear();  // board.reset() does not exist — use clear()
+      for (let i = 0; i < currentMoveIndex; i++) {
+        const m = moves[i];
+        board.setColor(m.color);
+        board.placeSetup(m.x, m.y, m.color);
+      }
+
+      // Board is interactive only in practice mode when moves remain
+      const hasMoves = currentMoveIndex < moves.length;
+      board.setInteractive(practiceMode && hasMoves);
+      if (practiceMode && hasMoves) {
+        board.setColor(moves[currentMoveIndex].color);
+      }
+
+      updateNav();
+    }
+
+    function updateNav() {
+      const moves = currentPattern?.moves || [];
+      const prevBtn     = document.getElementById('prev-btn');
+      const nextBtn     = document.getElementById('next-btn');
+      const practiceBtn = document.getElementById('practice-btn');
+      const counter     = document.getElementById('move-counter');
+      if (prevBtn)     prevBtn.disabled     = currentMoveIndex === 0;
+      if (nextBtn)     nextBtn.disabled     = currentMoveIndex >= moves.length;
+      if (practiceBtn) practiceBtn.textContent = practiceMode ? 'Stop Practice' : 'Practice';
+      if (counter) {
+        const hasMoves = currentMoveIndex < moves.length;
+        const turnLabel = (practiceMode && hasMoves)
+          ? ` — ${moves[currentMoveIndex].color === 'B' ? 'Black' : 'White'} to play`
+          : '';
+        counter.textContent = `Move ${currentMoveIndex} / ${moves.length}${turnLabel}`;
+      }
+    }
+
+    // ── Handle user-played move (practice mode only) ──────────────────
+    async function onUserMove(col, row) {
+      if (!currentPattern || !practiceMode) return;
+      const moves = currentPattern.moves || [];
+      if (currentMoveIndex >= moves.length) return;
+
+      const expected  = moves[currentMoveIndex];
+      const isCorrect = (col === expected.x && row === expected.y);
+
+      if (isCorrect) {
+        currentMoveIndex++;
+        refreshBoardState();
+        hideDeviation();
+      } else {
+        // Immediately undo the wrong stone and mark the correct position
+        refreshBoardState();
+        board.addMarker(expected.x, expected.y, 'triangle');
+        board.setInteractive(false);
+
+        const colLabel  = COL_LABELS[expected.x] ?? expected.x;
+        const rowLabel  = 19 - expected.y;
+        const basicText = `The joseki move is ${colLabel}${rowLabel} (marked with a triangle). ` +
+          `Try again — use ← Prev then Next → to replay the sequence if needed.`;
+
+        showDeviationLoading();
+
+        try {
+          const moveSeq      = moves.slice(0, currentMoveIndex).map(m => ({ color: m.color, col: m.x, row: m.y }));
+          const deviationMove = { color: expected.color, col, row };
+          const res = await API.josekiDeviation(moveSeq, deviationMove, BOARD_SIZE, userRank);
+          showDeviation(res.explanation, res.pointLoss, false);
+        } catch(e) {
+          // Engine unavailable — still give useful feedback without an error heading
+          showDeviation(basicText, null, false);
+        }
+
+        board.setInteractive(true);
+      }
+    }
+
+    // ── Deviation UI ─────────────────────────────────────────────────
+    function showDeviationLoading() {
+      const box = document.getElementById('deviation-box');
+      if (!box) return;
+      document.getElementById('deviation-header').textContent = 'Off-joseki';
+      document.getElementById('deviation-text').textContent = 'Checking…';
+      box.className = 'deviation-box show';
+    }
+
+    function showDeviation(text, pointLoss, isError) {
+      const box = document.getElementById('deviation-box');
+      if (!box) return;
+      const header = document.getElementById('deviation-header');
+      const textEl = document.getElementById('deviation-text');
+      header.textContent = isError
+        ? 'Engine unavailable'
+        : (pointLoss != null ? `Off-joseki — ~${Math.abs(pointLoss).toFixed(1)} pt loss` : 'Off-joseki');
+      textEl.textContent = text;
+      Glossary.wrap(textEl);
+      box.className = `deviation-box show${isError ? ' error' : ''}`;
+    }
+
+    function hideDeviation() {
+      const box = document.getElementById('deviation-box');
+      if (box) box.className = 'deviation-box';
+    }
+
+    // ── Utilities ────────────────────────────────────────────────────
+    function escHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    init();
+  </script>
+</body>
+</html>
+
+========================================
 FILE: ./katago-service/analysis.cfg
 ========================================
 # KataGo analysis engine config
@@ -4561,6 +6152,22 @@ function komi(boardSize) {
   return boardSize === 19 ? 7.5 : boardSize === 13 ? 6.5 : 5.5;
 }
 
+// Parse KataGo's flat ownership array into a GTP-keyed map.
+// ownershipFlat: row-major array of length boardSize*boardSize.
+// Values: +1.0 = Black owns, -1.0 = White owns (from Black's perspective).
+// Row 0 in the flat array = top row of board = GTP row boardSize.
+function parseOwnershipMap(ownershipFlat, boardSize) {
+  if (!Array.isArray(ownershipFlat) || ownershipFlat.length !== boardSize * boardSize) return null;
+  const map = {};
+  for (let row = 0; row < boardSize; row++) {
+    for (let col = 0; col < boardSize; col++) {
+      const gtp = COLS[col] + (boardSize - row);
+      map[gtp] = ownershipFlat[row * boardSize + col];
+    }
+  }
+  return map;
+}
+
 // ---------- HTTP plumbing ----------
 
 function respond(res, status, body) {
@@ -4751,6 +6358,7 @@ const server = http.createServer(async (req, res) => {
         boardYSize:    boardSize,
         analyzeTurns:  [movesArr.length],
         maxVisits:     100,
+        includeOwnership: true,
       });
 
       const topMoves = (result.moveInfos || []).slice(0, 5).map(m => ({
@@ -4761,11 +6369,13 @@ const server = http.createServer(async (req, res) => {
         pv: (m.pv || []).slice(0, 5),
       }));
       const best = topMoves[0];
+      const ownershipMap = parseOwnershipMap(result.ownership, boardSize);
       return respond(res, 200, {
-        winrate:   result.rootInfo?.winrate   ?? null,
-        scoreLead: result.rootInfo?.scoreLead ?? null,
-        bestMove:  best?.move ?? null,
+        winrate:      result.rootInfo?.winrate   ?? null,
+        scoreLead:    result.rootInfo?.scoreLead ?? null,
+        bestMove:     best?.move ?? null,
         topMoves,
+        ownershipMap,
       });
     } catch (e) {
       console.error('/analyze-position error:', e.message);
@@ -4931,6 +6541,7 @@ FILE: ./netlify.toml
   status = 200
 
 [build]
+  command = "bash generate-repo-export.sh"
   publish = "."
   functions = "functions"
 
@@ -5330,6 +6941,7 @@ FILE: ./play.html
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script src="board.js"></script>
+  <script src="glossary.js"></script>
   <script>
     let board             = null;
     let boardSize         = 9;
@@ -5997,6 +7609,7 @@ FILE: ./play.html
     function setCommentary(text) {
       const el = document.getElementById('move-commentary');
       el.textContent = text;
+      Glossary.wrap(el);
       el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
@@ -6214,6 +7827,32 @@ FILE: ./problems.html
       to   { opacity: 1; transform: translateY(0); }
     }
 
+    /* ── Category tabs ── */
+    .category-tabs {
+      display: flex; gap: 0.4rem;
+      margin-bottom: 0.5rem;
+      animation: fadeUp 0.3s ease both;
+    }
+
+    /* ── Category definition ── */
+    .category-def {
+      font-size: 0.8rem; color: var(--ink-faint); line-height: 1.5;
+      margin-bottom: 0.75rem; min-height: 1.2em;
+    }
+    .category-tab {
+      flex: 1; padding: 0.4rem 0.5rem;
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase; text-align: center;
+      border: 1.5px solid var(--paper-deep);
+      border-radius: 100px;
+      background: white; color: var(--ink-faint);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .category-tab.active {
+      background: var(--ink); color: var(--paper);
+      border-color: var(--ink);
+    }
+
     /* ── Bottom nav ── */
     .bottom-nav { display: flex; }
 
@@ -6308,6 +7947,15 @@ FILE: ./problems.html
         <div id="rank-change-wrap"></div>
       </div>
 
+      <!-- Category filter -->
+      <div class="category-tabs">
+        <button class="category-tab active" data-cat="" onclick="selectCategory(this, '')">All</button>
+        <button class="category-tab" data-cat="life_death" onclick="selectCategory(this, 'life_death')">Life &amp; Death</button>
+        <button class="category-tab" data-cat="tesuji"     onclick="selectCategory(this, 'tesuji')">Tesuji</button>
+        <button class="category-tab" data-cat="shape"      onclick="selectCategory(this, 'shape')">Shape</button>
+      </div>
+      <p class="category-def" id="category-def"></p>
+
       <!-- Problem header -->
       <div class="problem-header">
         <div class="problem-meta">
@@ -6393,18 +8041,42 @@ FILE: ./problems.html
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script src="board.js"></script>
+  <script src="glossary.js"></script>
   <script>
-    let currentProblem = null;
-    let board          = null;
-    let attemptNumber  = 0;
-    let hintsUsed      = 0;
-    let solved         = false;
-    let isMoving       = false;
-    let userId         = null;
-    let userProfile    = null;
-    let totalSolved    = 0;
+    let currentProblem    = null;
+    let board             = null;
+    let attemptNumber     = 0;
+    let hintsUsed         = 0;
+    let solved            = false;
+    let isMoving          = false;
+    let userId            = null;
+    let userProfile       = null;
+    let totalSolved       = 0;
+    let selectedCategory  = '';   // '' = all, 'life_death', 'tesuji', 'shape'
     let prefetchedProblem = null;  // next problem preloaded in background
     let prefetchPromise   = null;  // in-flight prefetch Promise
+
+    const CATEGORY_DEFS = {
+      '':           'Tactical puzzles from all categories — find the vital move to solve each position.',
+      'life_death': 'Life & Death: determine whether a group can survive or be killed. Mastering this is the foundation of Go — groups with no two eyes cannot live.',
+      'tesuji':     'Tesuji: a clever tactical move that solves a local problem efficiently — often unexpected, exploiting a weakness in the opponent\'s shape.',
+      'shape':      'Shape: recognize good and bad stone formations. Efficient shapes strengthen your groups; bad shapes like the empty triangle waste stones.',
+    };
+
+    function setCategoryDef(cat) {
+      const el = document.getElementById('category-def');
+      if (el) el.textContent = CATEGORY_DEFS[cat] || '';
+    }
+
+    function selectCategory(btn, cat) {
+      selectedCategory = cat;
+      document.querySelectorAll('.category-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      setCategoryDef(cat);
+      prefetchedProblem = null;
+      prefetchPromise   = null;
+      loadNewProblem();
+    }
 
 
     // ── Init ────────────────────────────────────────────────────
@@ -6417,6 +8089,7 @@ FILE: ./problems.html
 
       document.getElementById('stat-rank').textContent  = userProfile.current_rank;
       document.getElementById('stat-score').textContent = userProfile.rank_score;
+      setCategoryDef(selectedCategory);
 
       totalSolved = await UserDB.getSolvedCount(userId);
       document.getElementById('stat-solved').textContent = totalSolved;
@@ -6439,7 +8112,9 @@ FILE: ./problems.html
     function schedulePrefetch() {
       if (!userProfile) return;
       prefetchedProblem = null;
-      prefetchPromise = API.generateProblem(userProfile.current_rank, null, 9)
+      prefetchPromise = API.generateProblem(
+          userProfile.current_rank, null, 9, selectedCategory || null, userId
+        )
         .then(res => { prefetchedProblem = res.problem; return res.problem; })
         .catch(() => null);
     }
@@ -6481,7 +8156,9 @@ FILE: ./problems.html
           prefetchPromise   = null;
         } else {
           // First load (no prefetch yet) or prefetch failed — fetch directly.
-          const res = await API.generateProblem(userProfile.current_rank, null, 9);
+          const res = await API.generateProblem(
+            userProfile.current_rank, null, 9, selectedCategory || null, userId
+          );
           problem = res.problem;
         }
 
@@ -6541,13 +8218,7 @@ FILE: ./problems.html
 
       const PADDING = 28;
       const CELL    = 36;
-
-      // Make SVG fill container width responsively
-      svg.setAttribute('width', '100%');
-      svg.removeAttribute('height');
-      svg.style.width  = '100%';
-      svg.style.height = 'auto';
-      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      const total   = PADDING * 2 + CELL * (boardSize - 1);
 
       const stoneKeys = Object.keys(problem.setup?.stones || {});
       if (!stoneKeys.length) return;
@@ -6568,11 +8239,20 @@ FILE: ./problems.html
       const maxRow = Math.min(boardSize - 1, Math.max(...allRows) + PAD);
 
       const margin = CELL * 0.75;
-      const vbX = PADDING + minCol * CELL - margin;
-      const vbY = PADDING + minRow * CELL - margin;
-      const vbW = (maxCol - minCol) * CELL + margin * 2 + CELL;
-      const vbH = (maxRow - minRow) * CELL + margin * 2 + CELL;
-      svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
+      let vbX = PADDING + minCol * CELL - margin;
+      let vbY = PADDING + minRow * CELL - margin;
+      let vbW = (maxCol - minCol) * CELL + margin * 2 + CELL;
+      let vbH = (maxRow - minRow) * CELL + margin * 2 + CELL;
+
+      // Force a square viewBox so the SVG fills the square container without
+      // letterboxing. A non-square viewBox with height:100%/width:auto (mobile CSS)
+      // causes the SVG to be narrower than the container, exposing the container
+      // background as a fake "full board" behind the actual cropped SVG.
+      const vbSize = Math.max(vbW, vbH);
+      if (vbW < vbSize) vbX -= (vbSize - vbW) / 2;
+      if (vbH < vbSize) vbY -= (vbSize - vbH) / 2;
+
+      svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbSize} ${vbSize}`);
     }
 
     // ── Handle user move ─────────────────────────────────────────
@@ -6641,10 +8321,14 @@ FILE: ./problems.html
 
       const points = Rank.pointsForProblem(true, hintsUsed, currentProblem.difficulty || 1);
       await updateRankScore(points);
-      await UserDB.logAttempt(
-        userId, currentProblem.id, currentProblem.boardSize || 19,
-        currentProblem.topic, true, hintsUsed
-      );
+      await Promise.all([
+        UserDB.logAttempt(
+          userId, currentProblem.id, currentProblem.boardSize || 19,
+          currentProblem.topic, true, hintsUsed
+        ),
+        API.updateSchedule(userId, currentProblem.id, true, hintsUsed, attemptNumber)
+          .catch(() => {}), // schedule update is best-effort
+      ]);
     }
 
     async function onFailed() {
@@ -6655,10 +8339,14 @@ FILE: ./problems.html
 
       const points = Rank.pointsForProblem(false, 0, currentProblem.difficulty || 1);
       await updateRankScore(points);
-      await UserDB.logAttempt(
-        userId, currentProblem.id, currentProblem.boardSize || 19,
-        currentProblem.topic, false, hintsUsed
-      );
+      await Promise.all([
+        UserDB.logAttempt(
+          userId, currentProblem.id, currentProblem.boardSize || 19,
+          currentProblem.topic, false, hintsUsed
+        ),
+        API.updateSchedule(userId, currentProblem.id, false, hintsUsed, attemptNumber)
+          .catch(() => {}), // schedule update is best-effort
+      ]);
     }
 
     async function updateRankScore(points) {
@@ -6686,6 +8374,7 @@ FILE: ./problems.html
       const box = document.getElementById('commentary');
       box.textContent = text;
       box.className   = `commentary-box show${type ? ' ' + type : ''}`;
+      Glossary.wrap(box);
       // Smoothly bring the result into view — critical on small phones where
       // the board fills much of the screen.
       box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -7312,6 +9001,7 @@ FILE: ./progress.html
   </script>
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
+  <script src="glossary.js"></script>
   <script>
     const SENSEI_BASE = 'https://senseis.xmp.net/?';
     const MIN_GAMES   = 5;
@@ -7503,6 +9193,9 @@ FILE: ./progress.html
         sec.appendChild(list);
       }
 
+      // Wrap Go terms in Claude-generated content
+      Glossary.wrap(sec);
+
       // Meta
       const meta = document.createElement('p');
       meta.className = 'analysis-meta';
@@ -7628,10 +9321,6 @@ FILE: ./progress.html
   </script>
 </body>
 </html>
-
-========================================
-FILE: ./repo-export.txt
-========================================
 
 ========================================
 FILE: ./review.html
@@ -7928,6 +9617,7 @@ FILE: ./review.html
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script src="board.js"></script>
+  <script src="glossary.js"></script>
   <script>
     // ── State ─────────────────────────────────────────────────────
     let userId      = null;
@@ -8399,6 +10089,9 @@ FILE: ./review.html
         sec.appendChild(div);
       }
 
+      // Wrap Go terms in all Claude-generated text
+      Glossary.wrap(sec);
+
       // Re-render winrate chart now that keyMoments are known (for ticks)
       if (winrateTurns.length) renderWinrateChart();
     }
@@ -8411,6 +10104,329 @@ FILE: ./review.html
   </script>
 </body>
 </html>
+
+========================================
+FILE: ./scripts/seed-openings.js
+========================================
+#!/usr/bin/env node
+/**
+ * seed-openings.js — Populate the opening_patterns table with joseki and fuseki patterns.
+ *
+ * Usage:
+ *   SUPABASE_URL=https://xxx.supabase.co \
+ *   SUPABASE_SERVICE_KEY=your_service_role_key \
+ *   node scripts/seed-openings.js
+ *
+ * Uses the service role key (not the anon key) so it can bypass RLS.
+ * Skips any pattern whose position_hash already exists in the table.
+ *
+ * Coordinates: x = column (0 = leftmost), y = row (0 = top), 0-indexed on a 19×19 board.
+ * Star points (hoshi): (3,3), (3,9), (3,15), (9,3), (9,9), (9,15), (15,3), (15,9), (15,15)
+ */
+
+'use strict';
+const crypto = require('crypto');
+
+// ── Position hash ─────────────────────────────────────────────────────────────
+// Stable identifier for a move sequence; order matters (replays must be deterministic).
+function positionHash(moves) {
+  const repr = moves.map(m => `${m.color}${m.x},${m.y}`).join('|');
+  return crypto.createHash('sha256').update(repr).digest('hex').slice(0, 20);
+}
+
+// ── Pattern definitions ───────────────────────────────────────────────────────
+//
+// JOSEKI: corner sequences, played in the top-left quadrant for consistency.
+//   All sequences start at the first stone played in the corner.
+//   Coordinates verified against standard Go references.
+//
+// FUSEKI: whole-board opening frameworks, 4–6 moves showing key positions.
+//   White's moves represent typical responses; specific continuations may vary.
+
+const PATTERNS = [
+
+  // ════════════════════════════════════════════════════════════════════
+  // JOSEKI
+  // ════════════════════════════════════════════════════════════════════
+
+  {
+    name: 'Star Point — 3-3 Invasion',
+    category: 'joseki',
+    corner: 'top-left',
+    difficulty: 1,
+    description:
+      'The most common modern joseki (popularised by AlphaGo). White invades Black\'s ' +
+      '4-4 star point at the 3-3 point. White lives small in the corner; Black builds ' +
+      'a strong outside wall facing the centre.',
+    result: 'equal',
+    tags: ['star-point', '4-4', 'san-san', 'invasion', 'beginner'],
+    moves: [
+      { color: 'B', x: 3, y: 3 },   // Black's 4-4 star point
+      { color: 'W', x: 2, y: 2 },   // White invades 3-3
+      { color: 'B', x: 3, y: 2 },   // Black blocks — prevents White extending right
+      { color: 'W', x: 2, y: 3 },   // White turns toward the corner
+      { color: 'B', x: 2, y: 4 },   // Black descends, sealing White from below
+      { color: 'W', x: 3, y: 4 },   // White extends into corner
+      { color: 'B', x: 4, y: 3 },   // Black seals — takes outside influence
+    ],
+  },
+
+  {
+    name: 'Star Point — Keima Shimari',
+    category: 'joseki',
+    corner: 'top-left',
+    difficulty: 1,
+    description:
+      'After claiming the 4-4 star point, Black uses a knight\'s move to form a two-stone ' +
+      'corner enclosure (shimari). The resulting shape is flexible — hard to invade and ' +
+      'projects influence toward both the top edge and the left side.',
+    result: 'influence',
+    tags: ['star-point', '4-4', 'shimari', 'enclosure', 'beginner'],
+    moves: [
+      { color: 'B', x: 3,  y: 3  },  // Black's 4-4 star point
+      { color: 'W', x: 15, y: 15 },  // White plays elsewhere (bottom-right)
+      { color: 'B', x: 5,  y: 2  },  // Black's knight's move shimari toward the top edge
+    ],
+  },
+
+  {
+    name: 'Star Point — One-Space Low Approach',
+    category: 'joseki',
+    corner: 'top-left',
+    difficulty: 2,
+    description:
+      'White approaches Black\'s 4-4 stone with a one-space low approach. Black extends ' +
+      'downward to maintain a flexible position. The resulting shape gives Black territory ' +
+      'potential along the left side while White aims for influence.',
+    result: 'equal',
+    tags: ['star-point', '4-4', 'approach', 'kakari', 'intermediate'],
+    moves: [
+      { color: 'B', x: 3, y: 3 },  // Black's 4-4 star point
+      { color: 'W', x: 5, y: 3 },  // White's one-space low approach (ikken kakari)
+      { color: 'B', x: 3, y: 5 },  // Black extends — one-space low extension
+      { color: 'W', x: 5, y: 5 },  // White jumps into the centre
+      { color: 'B', x: 2, y: 3 },  // Black protects the corner
+    ],
+  },
+
+  {
+    name: 'Komoku — Basic Corner',
+    category: 'joseki',
+    corner: 'top-left',
+    difficulty: 1,
+    description:
+      'Black plays the 3-4 (komoku) corner point — the most common classical corner move. ' +
+      'The asymmetric placement creates natural tension: one side is stronger (the 4th-line ' +
+      'direction) and one is weaker (the 3rd-line side). White must choose how to approach.',
+    result: 'territory',
+    tags: ['komoku', '3-4', 'classical', 'beginner'],
+    moves: [
+      { color: 'B', x: 2, y: 3 },  // Black's komoku — 3rd from left, 4th from top
+      { color: 'W', x: 5, y: 2 },  // White's keima approach from the right
+      { color: 'B', x: 2, y: 5 },  // Black extends — one-space jump toward the bottom
+      { color: 'W', x: 3, y: 2 },  // White peeps at the top
+      { color: 'B', x: 2, y: 2 },  // Black connects, securing the corner
+    ],
+  },
+
+  {
+    name: 'Star Point — Two-Space High Pincer',
+    category: 'joseki',
+    corner: 'top-left',
+    difficulty: 2,
+    description:
+      'After White approaches Black\'s 4-4 stone, Black answers with a two-space high ' +
+      'pincer — an aggressive response that pressures White and fights for the left side. ' +
+      'This leads to complex, double-wing fighting sequences.',
+    result: 'influence',
+    tags: ['star-point', '4-4', 'pincer', 'fighting', 'intermediate'],
+    moves: [
+      { color: 'B', x: 3, y: 3  },  // Black's 4-4 star point
+      { color: 'W', x: 5, y: 3  },  // White's one-space low approach
+      { color: 'B', x: 3, y: 6  },  // Black's two-space high pincer
+      { color: 'W', x: 5, y: 5  },  // White jumps to the centre to escape
+      { color: 'B', x: 4, y: 4  },  // Black blocks, maintaining pressure
+    ],
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  // FUSEKI
+  // ════════════════════════════════════════════════════════════════════
+
+  {
+    name: 'Nirensei — Twin Stars',
+    category: 'fuseki',
+    corner: null,
+    difficulty: 1,
+    description:
+      'Black plays two star points on the same side (top-left and bottom-left), forming ' +
+      'a framework that emphasises outside influence over the left side of the board. ' +
+      'The two star points are connected by the left-side star point at (3,9).',
+    result: 'influence',
+    tags: ['nirensei', 'star-point', 'influence', 'beginner'],
+    moves: [
+      { color: 'B', x: 3,  y: 3  },  // Black's top-left star point
+      { color: 'W', x: 15, y: 3  },  // White mirrors — top-right star point
+      { color: 'B', x: 3,  y: 15 },  // Black's bottom-left star (nirensei complete)
+      { color: 'W', x: 15, y: 15 },  // White mirrors — bottom-right star point
+    ],
+  },
+
+  {
+    name: 'Sanrensei — Three Stars',
+    category: 'fuseki',
+    corner: null,
+    difficulty: 2,
+    description:
+      'Black plays three star points along the left side: top-left, left-centre, and ' +
+      'bottom-left. This powerful influence-oriented opening controls a vast left-side ' +
+      'moyo. The challenge is converting that potential into real territory against invasions.',
+    result: 'influence',
+    tags: ['sanrensei', 'star-point', 'moyo', 'influence', 'intermediate'],
+    moves: [
+      { color: 'B', x: 3,  y: 3  },  // Top-left star
+      { color: 'W', x: 15, y: 3  },  // White takes top-right star
+      { color: 'B', x: 3,  y: 9  },  // Black's left-side centre star
+      { color: 'W', x: 15, y: 9  },  // White takes right-side centre star
+      { color: 'B', x: 3,  y: 15 },  // Black's bottom-left star (sanrensei complete)
+      { color: 'W', x: 15, y: 15 },  // White mirrors — bottom-right star
+    ],
+  },
+
+  {
+    name: 'Chinese Opening — Low Framework',
+    category: 'fuseki',
+    corner: null,
+    difficulty: 2,
+    description:
+      'Black builds a flexible right-side framework with a star point (4-4), a komoku ' +
+      '(3-4) on the same side, and an extension along the 4th line. The "Low Chinese" ' +
+      'is solid — it leans toward territory while still projecting some centre influence.',
+    result: 'territory',
+    tags: ['chinese', 'framework', 'komoku', 'star-point', 'intermediate'],
+    moves: [
+      { color: 'B', x: 15, y: 3  },  // Black's top-right star point (4-4)
+      { color: 'W', x: 3,  y: 3  },  // White takes top-left star
+      { color: 'B', x: 16, y: 15 },  // Black's bottom-right komoku (3rd from right, 4th from bottom)
+      { color: 'W', x: 3,  y: 15 },  // White takes bottom-left star
+      { color: 'B', x: 15, y: 9  },  // Black extends on the right side — completes the framework
+    ],
+  },
+
+  {
+    name: 'Chinese Opening — High Framework',
+    category: 'fuseki',
+    corner: null,
+    difficulty: 2,
+    description:
+      'A variation of the Chinese Opening where Black\'s side stone is on the 4th line ' +
+      '(high) rather than the 3rd line (low). The "High Chinese" sacrifices some bottom-line ' +
+      'territory for greater centre influence and a more flexible fighting position.',
+    result: 'influence',
+    tags: ['chinese', 'high', 'framework', 'komoku', 'star-point', 'intermediate'],
+    moves: [
+      { color: 'B', x: 15, y: 3  },  // Black's top-right star point
+      { color: 'W', x: 3,  y: 3  },  // White takes top-left star
+      { color: 'B', x: 15, y: 16 },  // Black's bottom-right komoku (4th from right, 3rd from bottom)
+      { color: 'W', x: 3,  y: 15 },  // White takes bottom-left star
+      { color: 'B', x: 15, y: 9  },  // Black's 4th-line extension — High Chinese complete
+    ],
+  },
+
+  {
+    name: 'Orthodox Opening',
+    category: 'fuseki',
+    corner: null,
+    difficulty: 3,
+    description:
+      'The classical opening: Black plays komoku in multiple corners, building a solid ' +
+      'territorial base from the 3rd line before fighting for the centre. This balanced ' +
+      'approach is favoured by players who prefer structured, territory-based Go.',
+    result: 'territory',
+    tags: ['orthodox', 'komoku', 'classical', 'territory', 'advanced'],
+    moves: [
+      { color: 'B', x: 15, y: 2  },  // Black's top-right komoku (4th from right, 3rd from top)
+      { color: 'W', x: 3,  y: 2  },  // White's top-left komoku
+      { color: 'B', x: 2,  y: 15 },  // Black's bottom-left komoku (3rd from left, 4th from bottom)
+      { color: 'W', x: 15, y: 15 },  // White takes bottom-right star point
+      { color: 'B', x: 15, y: 9  },  // Black extends on the right
+      { color: 'W', x: 9,  y: 3  },  // White takes top-centre star point
+    ],
+  },
+
+];
+
+// ── Seed ─────────────────────────────────────────────────────────────────────
+
+async function seed() {
+  const url  = process.env.SUPABASE_URL;
+  const key  = process.env.SUPABASE_SERVICE_KEY;
+
+  if (!url || !key) {
+    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY before running.');
+    process.exit(1);
+  }
+
+  // Fetch existing hashes to avoid duplicates.
+  const existRes = await fetch(`${url}/rest/v1/opening_patterns?select=position_hash`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  });
+  if (!existRes.ok) {
+    const txt = await existRes.text();
+    console.error('Failed to fetch existing patterns:', existRes.status, txt);
+    process.exit(1);
+  }
+  const existing = new Set((await existRes.json()).map(r => r.position_hash));
+  console.log(`${existing.size} patterns already in DB.`);
+
+  let inserted = 0;
+  let skipped  = 0;
+
+  for (const p of PATTERNS) {
+    const hash = positionHash(p.moves);
+
+    if (existing.has(hash)) {
+      console.log(`  skip  ${p.name}`);
+      skipped++;
+      continue;
+    }
+
+    const body = {
+      name:          p.name,
+      category:      p.category,
+      corner:        p.corner,
+      difficulty:    p.difficulty,
+      description:   p.description,
+      result:        p.result,
+      tags:          p.tags,
+      moves:         p.moves,
+      position_hash: hash,
+    };
+
+    const ins = await fetch(`${url}/rest/v1/opening_patterns`, {
+      method: 'POST',
+      headers: {
+        apikey:         key,
+        Authorization:  `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Prefer:         'return=minimal',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (ins.ok) {
+      console.log(`  insert ${p.name}`);
+      inserted++;
+    } else {
+      const txt = await ins.text();
+      console.error(`  ERROR  ${p.name}: ${ins.status} ${txt}`);
+    }
+  }
+
+  console.log(`\nDone. Inserted ${inserted}, skipped ${skipped}.`);
+}
+
+seed().catch(e => { console.error(e); process.exit(1); });
 
 ========================================
 FILE: ./styles.css
@@ -9016,7 +11032,12 @@ create table public.tsumego_problems (
   to_play      text not null check (to_play in ('B', 'W')),
   stones       jsonb not null,        -- { "col,row": "B"|"W", ... }
   solution_col integer not null,
-  solution_row integer not null
+  solution_row integer not null,
+  category     text not null default 'life_death'
+               check (category in ('life_death', 'tesuji', 'shape'))
+               -- 'life_death': classic tsumego (live/kill)
+               -- 'tesuji':     tactical exploitation patterns (snapback, squeeze, etc.)
+               -- 'shape':      stone efficiency and good/bad shape drills
 );
 
 alter table public.tsumego_problems enable row level security;
@@ -9024,4 +11045,49 @@ alter table public.tsumego_problems enable row level security;
 -- Problems are read-only for authenticated users (no user-owned rows)
 create policy "Problems: read for authenticated" on public.tsumego_problems
   for select using (auth.role() = 'authenticated');
+
+-- ── Spaced Repetition Schedule ────────────────────────────────────────────
+-- One row per (user, problem). Tracks SM-2 state for adaptive review scheduling.
+-- When a problem is first attempted, a row is inserted here.
+-- After each review, ease_factor, interval, and next_review_date are updated.
+create table public.problem_schedule (
+  id                   uuid primary key default uuid_generate_v4(),
+  user_id              uuid not null references public.users(id) on delete cascade,
+  problem_id           text not null,          -- matches problem_attempts.problem_id format: 'db_<uuid>'
+  ease_factor          numeric(4,2) not null default 2.5,  -- SM-2: starts at 2.5, min 1.3
+  interval_days        integer not null default 1,         -- days until next review
+  consecutive_correct  integer not null default 0,
+  next_review_date     date not null default current_date,
+  last_reviewed_at     timestamptz not null default now(),
+  unique (user_id, problem_id)
+);
+
+alter table public.problem_schedule enable row level security;
+create policy "Schedule: all own" on public.problem_schedule
+  for all using (auth.uid() = user_id);
+
+-- ── Opening Patterns (Joseki / Fuseki dictionary) ─────────────────────────
+-- Stores navigable SGF sequences for the interactive opening explorer.
+-- Each row is a named pattern (joseki variation or fuseki line).
+-- The sgf_tree column is the raw SGF string for that line/variation.
+-- position_hash is a stable key derived from the move sequence (for lookups).
+create table public.opening_patterns (
+  id             uuid primary key default uuid_generate_v4(),
+  name           text not null,            -- e.g. 'San-San Invasion', 'Chinese Opening'
+  category       text not null            -- 'joseki' | 'fuseki'
+               check (category in ('joseki', 'fuseki')),
+  corner         text,                     -- 'corner', 'side', 'whole-board', null for fuseki
+  difficulty     integer not null default 1 check (difficulty in (1, 2, 3)),
+  moves          jsonb not null,           -- ordered array of moves: [{"color":"B","x":3,"y":3}, ...]
+  position_hash  text not null,            -- SHA-like fingerprint of moves sequence for fast lookup
+  description    text,                     -- brief human-readable description
+  result         text,                     -- outcome summary: 'equal', 'territory', 'influence'
+  tags           text[] default '{}',      -- e.g. ['star-point', '3-3', 'invasion']
+  created_at     timestamptz not null default now()
+);
+
+alter table public.opening_patterns enable row level security;
+-- Opening patterns are public read — no user data
+create policy "Openings: public read" on public.opening_patterns
+  for select using (true);
 
