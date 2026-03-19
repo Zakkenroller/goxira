@@ -429,10 +429,18 @@
         renderWinrateChart();
       }
 
-      // If both chart and commentary are cached, render everything from DB — zero API calls.
-      if (game.ai_summary) {
+      // If both chart and commentary are cached with a real summary (not an error placeholder),
+      // render everything from DB — zero API calls.
+      const summaryIsGood = game.ai_summary &&
+        !game.ai_summary.overallComment?.toLowerCase().includes('unavailable');
+      if (summaryIsGood) {
         renderAnalysis(game.ai_summary, null);
         return;
+      }
+      // Bad summary cached (e.g. a previous Claude timeout was mistakenly persisted) — clear it
+      // so a fresh API call can overwrite it with a real result.
+      if (game.ai_summary && !summaryIsGood && userId && userId === currentGameOwner) {
+        UserDB.saveAiSummary(game.id, null);
       }
 
       // Commentary not yet cached — request it from the API.
