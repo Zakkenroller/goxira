@@ -292,6 +292,10 @@
   <script src="board.js"></script>
   <script src="glossary.js"></script>
   <script>
+    // Bump this (and SUMMARY_VERSION in functions/game-summary.js) when commentary logic changes.
+    // Cached summaries with a lower version are ignored and regenerated automatically.
+    const SUMMARY_VERSION = 1;
+
     // ── State ─────────────────────────────────────────────────────
     let userId      = null;
     let userProfile = null;
@@ -443,9 +447,10 @@
         renderWinrateChart();
       }
 
-      // If both chart and commentary are cached with a real summary (not an error placeholder),
-      // render everything from DB — zero API calls.
+      // If both chart and commentary are cached with a real summary (not an error placeholder
+      // and not from an older version of the analysis logic), render from DB — zero API calls.
       const summaryIsGood = game.ai_summary &&
+        (game.ai_summary.version ?? 0) >= SUMMARY_VERSION &&
         !game.ai_summary.overallComment?.toLowerCase().includes('unavailable');
       if (summaryIsGood) {
         renderAnalysis(game.ai_summary, null);
