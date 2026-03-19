@@ -255,7 +255,8 @@
 
     // Check if already assessed
     const profile = await UserDB.getProfile(userId);
-    if (profile?.assessment_done) { location.href = '/home.html'; return; }
+    if (!profile) { location.href = '/home.html'; return; }
+    if (profile.assessment_done) { location.href = '/home.html'; return; }
 
     // Get display name for personalization
     userContext = profile?.display_name || session.user.email;
@@ -328,20 +329,37 @@
       <p class="rank-reveal__label">Your Starting Rank</p>
       <p class="rank-reveal__rank">${result.rank}</p>
       <p class="rank-reveal__summary">${result.summary}</p>
-      <button class="btn btn--accent btn--full btn--lg" onclick="goToDashboard()">
-        Start Learning →
+      <button id="start-learning-btn" class="btn btn--accent btn--full btn--lg" disabled>
+        Saving…
       </button>
+      <p id="save-error" style="display:none;color:var(--red,#c0392b);margin-top:0.5rem;font-size:0.85rem;text-align:center"></p>
     `;
     thread.appendChild(card);
     scrollThread();
 
-    // Save to Supabase
-    try {
-      await UserDB.updateRank(userId, result.rank, result.rankScore);
-      await UserDB.markAssessmentDone(userId);
-    } catch(e) {
-      console.error('Failed to save rank:', e);
+    // Save to Supabase — button stays disabled until save confirms
+    async function trySave() {
+      const btn = document.getElementById('start-learning-btn');
+      const errEl = document.getElementById('save-error');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      errEl.style.display = 'none';
+      try {
+        await UserDB.updateRank(userId, result.rank, result.rankScore);
+        await UserDB.markAssessmentDone(userId);
+        btn.textContent = 'Start Learning →';
+        btn.disabled = false;
+        btn.onclick = goToDashboard;
+      } catch(e) {
+        console.error('Failed to save rank:', e);
+        btn.textContent = 'Retry';
+        btn.disabled = false;
+        btn.onclick = trySave;
+        errEl.textContent = 'Could not save your rank. Tap Retry to try again.';
+        errEl.style.display = 'block';
+      }
     }
+    trySave();
   }
 
   function goToDashboard() { location.href = '/home.html'; }
