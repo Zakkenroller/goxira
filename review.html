@@ -306,6 +306,7 @@
     let playerColor = 'B';     // colour the logged-in user played
     let currentGameId   = null;
     let currentGameOwner = null;
+    let _winrateClickHandler = null;
 
     // ── Init ──────────────────────────────────────────────────────
     async function init() {
@@ -408,11 +409,24 @@
       precomputeStates();
 
       // 3. Render board at move 0
+      document.getElementById('board-container').innerHTML = '';
       board = Board.create(document.getElementById('board-container'), boardSize, null);
       board.setInteractive(false);
       goToMove(0);
 
-      // 4. Request game summary + KataGo analysis in background
+      // 4. Reset stale state from any previous game before loading new analysis
+      winrateTurns = [];
+      keyMoments   = [];
+      const _skel = document.getElementById('winrate-skeleton');
+      const _svg  = document.getElementById('winrate-svg');
+      const _sect = document.getElementById('winrate-wrap')?.parentElement;
+      if (_skel) { _skel.style.display = ''; _skel.textContent = 'Calculating…'; }
+      if (_svg)  _svg.style.display = 'none';
+      if (_sect) _sect.style.display = 'none';
+      document.getElementById('analysis-section').innerHTML =
+        '<div class="analysis-loading"><span class="loader"></span> Analysing game…</div>';
+
+      // 5. Request game summary + KataGo analysis in background
       loadAnalysis(game, boardSize, playerColor);
     }
 
@@ -450,6 +464,7 @@
 
       API.gameSummary(game.sgf_content, boardSize, rank, playerColor, game.turns?.length ? game.turns : null)
         .then(data => {
+          if (currentGameId !== game.id) return; // user switched games — discard stale response
           // Detect engine-unavailable fallback: no turns and empty keyMoments
           const engineDown = !data.turns?.length && data.summary?.keyMoments?.length === 0
             && data.summary?.overallComment?.toLowerCase().includes('unavailable');
@@ -708,12 +723,14 @@
       skeleton.style.display = 'none';
       svg.style.display      = 'block';
 
-      // Tap/click on chart → jump to that move
-      wrap.addEventListener('click', e => {
+      // Tap/click on chart → jump to that move (remove old handler first to prevent stacking)
+      if (_winrateClickHandler) wrap.removeEventListener('click', _winrateClickHandler);
+      _winrateClickHandler = e => {
         const rect = wrap.getBoundingClientRect();
         const frac = (e.clientX - rect.left) / rect.width;
         goToMove(Math.round(frac * moves.length));
-      });
+      };
+      wrap.addEventListener('click', _winrateClickHandler);
 
       updateWinrateScrubber();
     }
