@@ -396,6 +396,7 @@
     let selectedCategory  = '';   // '' = all, 'life_death', 'tesuji', 'shape'
     let prefetchedProblem = null;  // next problem preloaded in background
     let prefetchPromise   = null;  // in-flight prefetch Promise
+    let loadGeneration    = 0;     // incremented on every loadNewProblem() call; stale renders bail out
 
     const CATEGORY_DEFS = {
       '':           'Tactical puzzles from all categories — find the vital move to solve each position.',
@@ -462,6 +463,7 @@
 
     // ── Load a new problem ───────────────────────────────────────
     async function loadNewProblem() {
+      const gen = ++loadGeneration; // any older in-flight load will bail when it checks gen
       attemptNumber = 0; hintsUsed = 0; solved = false; isMoving = false;
       currentProblem = null;
 
@@ -476,12 +478,11 @@
       document.getElementById('problem-description').textContent = 'Loading problem…';
       resetPips();
 
-      if (board) {
-        const container = document.getElementById('board-container');
-        const old = container.querySelector('svg');
-        if (old) old.remove();
-        board = null;
-      }
+      // Always remove every board SVG in the container — even if board is null
+      // (a previous in-flight renderProblem may have already appended one).
+      const container = document.getElementById('board-container');
+      container.querySelectorAll('svg').forEach(s => s.remove());
+      board = null;
 
       try {
         let problem = null;
@@ -504,11 +505,14 @@
         }
 
         if (!problem) throw new Error('No problem returned');
+        // Drop this result if a newer load has since been initiated.
+        if (gen !== loadGeneration) return;
         currentProblem = problem;
         renderProblem(currentProblem);
         // Immediately start loading the one after this.
         schedulePrefetch();
       } catch(e) {
+        if (gen !== loadGeneration) return;
         console.error('Problem load error:', e);
         document.getElementById('problem-description').textContent =
           'Failed to load problem. Tap Skip to try again.';
@@ -545,17 +549,20 @@
       document.getElementById('to-play').style.display = 'flex';
 
       // ── Auto-crop board to stone region ──
+      // Capture the specific SVG element now so that if loadNewProblem() fires
+      // again before the RAF runs, we don't accidentally crop the new board
+      // with this problem's stone positions.
+      const thisSvg = container.querySelector('svg');
       requestAnimationFrame(() => {
-        cropViewBox(problem, size);
+        cropViewBox(problem, size, thisSvg);
       });
     }
 
     // ── Crop SVG viewBox to the active stone region ──────────────
     // Board.js owns all touch/mouse interaction; this only adjusts the
     // visible area so problems render zoomed in on the relevant section.
-    function cropViewBox(problem, boardSize) {
-      const svg = document.querySelector('#board-container svg');
-      if (!svg) return;
+    function cropViewBox(problem, boardSize, svg) {
+      if (!svg || !svg.isConnected) return;
 
       const PADDING = 28;
       const CELL    = 36;
