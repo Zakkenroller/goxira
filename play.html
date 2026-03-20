@@ -28,6 +28,7 @@
       font-family: var(--font-sans);
     }
     .option-pill.selected { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .option-note { font-size: 0.75rem; color: var(--ink-faint); margin-top: 0.6rem; line-height: 1.4; }
 
     .color-options { display: flex; gap: 0.75rem; }
     .color-option {
@@ -262,10 +263,12 @@
         <div class="option-group">
           <p class="option-group__label">Difficulty</p>
           <div class="option-pills">
-            <button class="option-pill selected" data-diff="match" onclick="selectDiff(this)">Match my rank</button>
+            <button class="option-pill selected" data-diff="auto" onclick="selectDiff(this)">Auto</button>
+            <button class="option-pill" data-diff="match" onclick="selectDiff(this)">Match my rank</button>
             <button class="option-pill" data-diff="easier" onclick="selectDiff(this)">Easier</button>
             <button class="option-pill" data-diff="harder" onclick="selectDiff(this)">Harder</button>
           </div>
+          <p class="option-note" id="auto-diff-note">Opponent strength varies each game — you'll win some and lose some.</p>
         </div>
 
         <button class="btn btn--primary btn--full btn--lg" onclick="startGame()">
@@ -379,7 +382,8 @@
     let boardSize         = 9;
     let playerColor       = 'B';
     let claudeColor       = 'W';
-    let difficulty        = 'match';
+    let difficulty        = 'auto';
+    let autoOffset        = 0; // kyu offset chosen randomly at game start when difficulty === 'auto'
     let moveNumber        = 0;
     let sgfMoves          = [];
     let gameOver          = false;
@@ -424,9 +428,12 @@
       document.querySelectorAll('[data-diff]').forEach(e => e.classList.remove('selected'));
       el.classList.add('selected');
       difficulty = el.dataset.diff;
+      const note = document.getElementById('auto-diff-note');
+      if (note) note.style.display = difficulty === 'auto' ? '' : 'none';
     }
 
     async function startGame() {
+      if (difficulty === 'auto') autoOffset = pickAutoOffset();
       document.getElementById('setup-screen').style.display = 'none';
       document.getElementById('game-screen').style.display  = 'block';
 
@@ -866,7 +873,7 @@
       if (tier === 'beginner') {
         msgEl.textContent = "I think the big fights are settled. This is a great time to practice reading the board — knowing when the game shifts from fighting to counting is one of the hardest skills in Go.";
         noteEl.style.display = 'block';
-        noteEl.textContent   = "Let\u2019s keep playing so you can practice endgame moves \u2014 every point matters! I\u2019ll keep coaching you through it.";
+        noteEl.textContent   = "The tactical patterns you\u2019ve been practicing in tsumego \u2014 captures, atari, and life & death \u2014 show up in real games too. Keep an eye out for those moments in the endgame ahead. Every point matters!";
         actEl.innerHTML = `
           <button class="btn--primary-tp" onclick="teachingPauseContinue()">Keep playing \u2014 practice the endgame</button>
           <button class="btn--secondary-tp" onclick="teachingPauseReview()">Skip to game review</button>`;
@@ -1076,12 +1083,21 @@
     function updateMoveCount() {
       document.getElementById('move-count').textContent = `Move ${moveNumber}`;
     }
+    function pickAutoOffset() {
+      // 40% easier (+4), 30% at rank (0), 30% harder (-3)
+      const r = Math.random();
+      if (r < 0.40) return 4;
+      if (r < 0.70) return 0;
+      return -3;
+    }
     function getEffectiveRank() {
       const rank  = userProfile?.current_rank || '20 kyu';
       const match = rank.match(/(\d+)\s*(kyu|dan)/);
       if (!match || match[2] !== 'kyu') return rank;
-      if (difficulty === 'easier') return `${Math.min(30, parseInt(match[1]) + 5)} kyu`;
-      if (difficulty === 'harder') return `${Math.max(1,  parseInt(match[1]) - 5)} kyu`;
+      const kyu = parseInt(match[1]);
+      if (difficulty === 'auto')   return `${Math.min(30, Math.max(1, kyu + autoOffset))} kyu`;
+      if (difficulty === 'easier') return `${Math.min(30, kyu + 5)} kyu`;
+      if (difficulty === 'harder') return `${Math.max(1,  kyu - 5)} kyu`;
       return rank;
     }
 

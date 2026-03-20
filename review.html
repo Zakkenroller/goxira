@@ -91,6 +91,7 @@
     }
     .study-topic strong { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
     .study-link { display: inline-block; margin-top: 0.4rem; font-size: 0.8rem; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+    .study-practice-link { display: inline-block; margin-top: 0.4rem; margin-left: 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--ink); background: var(--paper-deep); border-radius: 100px; padding: 0.2rem 0.7rem; text-decoration: none; }
 
     /* ── Key moments ── */
     .moments-title { font-size: 0.75rem; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; }
@@ -809,7 +810,8 @@
         div.innerHTML = `<strong>Study focus</strong>${escHtml(summary.studyTopic)}`
           + (senseiUrl
             ? ` <a href="${senseiUrl}" target="_blank" rel="noopener" class="study-link">Learn more on Sensei&#39;s Library &rarr;</a>`
-            : '');
+            : '')
+          + ` <a href="problems.html" class="study-practice-link">Practice problems &rarr;</a>`;
         sec.appendChild(div);
       }
 

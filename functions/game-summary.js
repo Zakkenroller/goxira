@@ -206,6 +206,10 @@ TEACHING CALIBRATION:
 - 15k–5k: Introduce strategic reasoning. Explain why a move was directionally wrong.
 - 5k–1d+: Full strategic discussion. Discuss aji, thickness, direction of play.
 
+TSUMEGO CONNECTION:
+- If a key moment involves a pattern commonly trained through tsumego (life and death, ladder, net, snapback, cutting points, capturing race), briefly note that connection in the explanation — e.g. "this is a life-and-death problem in miniature" or "spotting ladders like this is exactly what tsumego practice builds."
+- Only mention the connection when it is genuinely present in the KataGo data. Do not invent connections.
+
 Respond ONLY with valid JSON, no markdown:
 {"overallComment":"2-3 sentence assessment","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences grounded in KataGo data"}],"studyTopic":"one concept to focus on","studyKeyword":"SenseiLibraryTopic"}
 
