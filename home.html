@@ -367,11 +367,17 @@
       document.getElementById('greeting-name').textContent =
         `${timeOfDay}, ${profile.display_name}`;
 
-      // Rank
-      document.getElementById('rank-display').textContent = profile.current_rank;
+      // Rank — show rough bucket until confidence is high
+      const displayedRank = Rank.displayRank(profile.current_rank, profile.rank_score, profile.rank_confidence);
+      document.getElementById('rank-display').textContent = displayedRank;
 
-      // Rank sub-text flavor
+      // Rank sub-text flavor keyed to rough buckets and specific ranks
       const rankFlavor = {
+        '30\u201326 kyu':      'Just starting out — every stone is a lesson.',
+        '25\u201321 kyu':      'Learning the fundamentals of capture and life.',
+        '20\u201316 kyu':      'Getting comfortable with whole-board thinking.',
+        '15\u201310 kyu':      'Reading sequences and building fighting instincts.',
+        '9 kyu and above': 'Strong foundations — keep sharpening your game.',
         '30 kyu': 'Just starting out — every stone is a lesson.',
         '25 kyu': 'Learning the fundamentals.',
         '20 kyu': 'Getting comfortable with captures.',
@@ -381,7 +387,7 @@
         '1 kyu':  'On the doorstep of dan.',
         '1 dan':  'A strong amateur.',
       };
-      const sub = rankFlavor[profile.current_rank] || 'Keep studying — you\'re improving.';
+      const sub = rankFlavor[displayedRank] || 'Keep studying — you\'re improving.';
       document.getElementById('rank-sub').textContent = sub;
 
       // Greeting sub

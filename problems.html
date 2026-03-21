@@ -429,7 +429,7 @@
       userProfile = await UserDB.getProfile(userId);
       if (!userProfile) { location.href = 'auth.html'; return; }
 
-      document.getElementById('stat-rank').textContent  = userProfile.current_rank;
+      document.getElementById('stat-rank').textContent  = Rank.displayRank(userProfile.current_rank, userProfile.rank_score, userProfile.rank_confidence);
       document.getElementById('stat-score').textContent = userProfile.rank_score;
       setCategoryDef(selectedCategory);
 
