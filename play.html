@@ -453,6 +453,15 @@
     let gameMode          = 'standard'; // 'standard' | 'atari'
     let atariTarget       = 1;          // 1 | 3 | 5 — capture target for Atari Go
 
+    // Pre-placed stones for Atari Go: 2×2 cluster at the board center.
+    // Pattern: White top-left & bottom-right, Black top-right & bottom-left.
+    const ATARI_START_STONES = [
+      { col: 3, row: 3, color: 'W' },
+      { col: 4, row: 3, color: 'B' },
+      { col: 3, row: 4, color: 'B' },
+      { col: 4, row: 4, color: 'W' },
+    ];
+
     async function init() {
       const session = await Auth.getSession();
       if (!session) { location.href = 'auth.html'; return; }
@@ -552,6 +561,13 @@
       document.getElementById('commentary-color').textContent = playerColor === 'B' ? 'Black' : 'White';
 
       board = Board.create(document.getElementById('board-container'), boardSize, onPlayerMove);
+
+      // Place Atari Go starting stones (2×2 cluster at center) before any moves.
+      if (gameMode === 'atari') {
+        for (const s of ATARI_START_STONES) board.place(s.col, s.row, s.color);
+        const atariColorWord = playerColor === 'B' ? 'Black' : 'White';
+        setCommentary(`4 stones are pre-placed at the center. You play ${atariColorWord}. First to capture ${atariTarget} stone${atariTarget === 1 ? '' : 's'} wins!`);
+      }
 
       // Place handicap stones on the board before the game begins.
       if (handicapStones.length > 0) {
@@ -1164,7 +1180,14 @@
             return `[${SGFCOLS[col]}${SGFCOLS[row]}]`;
           }).join('')
         : '';
-      return `(;GM[1]FF[4]SZ[${boardSize}]${haTag}${sgfMoves.join('')})`;
+      // Atari Go: encode the 4 pre-placed center stones so KataGo sees the correct starting position.
+      const atariTag = gameMode === 'atari'
+        ? 'AB' + ATARI_START_STONES.filter(s => s.color === 'B')
+            .map(s => `[${SGFCOLS[s.col]}${SGFCOLS[s.row]}]`).join('')
+          + 'AW' + ATARI_START_STONES.filter(s => s.color === 'W')
+            .map(s => `[${SGFCOLS[s.col]}${SGFCOLS[s.row]}]`).join('')
+        : '';
+      return `(;GM[1]FF[4]SZ[${boardSize}]${haTag}${atariTag}${sgfMoves.join('')})`;
     }
 
     // ── Handicap ──────────────────────────────────────────────────
