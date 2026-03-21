@@ -292,6 +292,7 @@
             <button class="option-pill" data-diff="harder" onclick="selectDiff(this)">Harder</button>
           </div>
           <p class="option-note" id="auto-diff-note">Opponent strength varies each game — you'll win some and lose some.</p>
+          <p class="option-note" id="atari-diff-note" style="display:none">Controls how deeply Goxira reads for captures. Auto varies each game so you'll face a mix of challenges.</p>
         </div>
 
         <div class="option-group">
@@ -490,8 +491,9 @@
       document.querySelectorAll('[data-diff]').forEach(e => e.classList.remove('selected'));
       el.classList.add('selected');
       difficulty = el.dataset.diff;
-      const note = document.getElementById('auto-diff-note');
-      if (note) note.style.display = difficulty === 'auto' ? '' : 'none';
+      // Show the "varies each game" note only in Auto mode; it lives under both standard and Atari notes.
+      document.getElementById('auto-diff-note').style.display = difficulty === 'auto' ? '' : 'none';
+      // In Atari mode, atari-diff-note is always visible regardless of difficulty choice.
     }
 
     function selectMode(el) {
@@ -501,19 +503,22 @@
       const isAtari = gameMode === 'atari';
       document.getElementById('capture-target-group').style.display = isAtari ? '' : 'none';
       document.getElementById('atari-mode-note').style.display = isAtari ? '' : 'none';
-      // In Atari Go, lock board to 9×9 and hide difficulty (no handicap needed)
+      // Difficulty stays fully active for Atari Go — it controls the rank passed to KataGo,
+      // which directly determines how aggressively the engine reads for captures.
       if (isAtari) {
         boardSize = 9;
         document.querySelectorAll('[data-size]').forEach(e => {
           e.classList.toggle('selected', e.dataset.size === '9');
           e.disabled = true;
         });
-        document.getElementById('diff-pills').style.opacity = '0.4';
-        document.getElementById('diff-pills').style.pointerEvents = 'none';
+        // Swap the difficulty note for an Atari-specific one
+        document.getElementById('auto-diff-note').style.display = difficulty === 'auto' ? '' : 'none';
+        document.getElementById('atari-diff-note').style.display = '';
       } else {
         document.querySelectorAll('[data-size]').forEach(e => { e.disabled = false; });
-        document.getElementById('diff-pills').style.opacity = '';
-        document.getElementById('diff-pills').style.pointerEvents = '';
+        document.getElementById('atari-diff-note').style.display = 'none';
+        const note = document.getElementById('auto-diff-note');
+        note.style.display = difficulty === 'auto' ? '' : 'none';
       }
     }
 
