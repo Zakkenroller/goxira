@@ -1257,6 +1257,26 @@
           })
           .catch(() => {}); // silent — review page retries on next open if this fails
       }
+
+      // Fire-and-forget rank calibration: refines rank estimate based on winrate
+      // swings over the game. Only runs on 9x9 standard Go with enough turns.
+      if (gameMode !== 'atari' && boardSize === 9 && turnHistory.length >= 10) {
+        Auth.getSession().then(session => {
+          if (!session?.access_token) return;
+          fetch('/.netlify/functions/rank-calibrate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              turnHistory,
+              boardSize,
+              currentRankScore: userProfile?.rank_score ?? 0,
+            }),
+          }).catch(() => {}); // silent — rank calibration is best-effort
+        }).catch(() => {});
+      }
     }
 
     function reviewGame() {

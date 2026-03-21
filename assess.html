@@ -194,14 +194,11 @@
   <div class="assess-header">
     <div class="assess-header__stone"></div>
     <h1>Let's find your level</h1>
-    <p>A short conversation — 5 to 8 questions. No wrong answers.</p>
+    <p>3 to 5 quick questions. No wrong answers. You can refine this later.</p>
   </div>
 
   <!-- Progress -->
   <div class="progress-dots" id="progress-dots">
-    <div class="progress-dot"></div>
-    <div class="progress-dot"></div>
-    <div class="progress-dot"></div>
     <div class="progress-dot"></div>
     <div class="progress-dot"></div>
     <div class="progress-dot"></div>
@@ -253,10 +250,8 @@
     if (!session) { location.href = '/auth.html'; return; }
     userId = session.user.id;
 
-    // Check if already assessed
     const profile = await UserDB.getProfile(userId);
     if (!profile) { location.href = '/home.html'; return; }
-    if (profile.assessment_done) { location.href = '/home.html'; return; }
 
     // Get display name for personalization
     userContext = profile?.display_name || session.user.email;
@@ -321,14 +316,18 @@
     // System message
     appendBubble('Assessment complete!', 'system');
 
-    // Rank reveal card
+    // Rank reveal card — shows rough bucket (confidence is always 'low' from questionnaire)
     const thread = document.getElementById('chat-thread');
     const card   = document.createElement('div');
     card.className = 'rank-reveal';
     card.innerHTML = `
-      <p class="rank-reveal__label">Your Starting Rank</p>
-      <p class="rank-reveal__rank">${result.rank}</p>
+      <p class="rank-reveal__label">Your Starting Level</p>
+      <p class="rank-reveal__rank">${result.bucket}</p>
       <p class="rank-reveal__summary">${result.summary}</p>
+      <p class="rank-reveal__summary" style="opacity:0.5;font-size:0.8rem">
+        This is a rough estimate. It will refine automatically as you play,
+        or you can set your exact rank on your profile.
+      </p>
       <button id="start-learning-btn" class="btn btn--accent btn--full btn--lg" disabled>
         Saving…
       </button>
@@ -345,7 +344,7 @@
       btn.textContent = 'Saving…';
       errEl.style.display = 'none';
       try {
-        await UserDB.updateRank(userId, result.rank, result.rankScore);
+        await UserDB.updateRank(userId, result.bucket, result.rankScore, 'low');
         await UserDB.markAssessmentDone(userId);
         btn.textContent = 'Start Learning →';
         btn.disabled = false;

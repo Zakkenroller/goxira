@@ -92,11 +92,10 @@ const UserDB = {
     return data;
   },
 
-  async updateRank(userId, rank, score) {
-    const { error } = await sb.from('users').update({
-      current_rank: rank,
-      rank_score: score,
-    }).eq('id', userId);
+  async updateRank(userId, rank, score, confidence = null) {
+    const update = { current_rank: rank, rank_score: score };
+    if (confidence) update.rank_confidence = confidence;
+    const { error } = await sb.from('users').update(update).eq('id', userId);
     if (error) throw error;
 
     // Also log to rank_history
@@ -105,6 +104,39 @@ const UserDB = {
       rank,
       rank_score: score,
     });
+  },
+
+  // Set rank manually from the profile page.
+  // isGranular=true means the user provided a specific rank (e.g., "15 kyu" from OGS) →
+  // trust it immediately and set confidence='high'. Rough bucket → confidence stays 'low'.
+  async setManualRank(userId, rank, score, isGranular) {
+    const confidence = isGranular ? 'high' : 'low';
+    const update = {
+      current_rank: rank,
+      rank_score: score,
+      rank_confidence: confidence,
+      games_calibrated: 0, // reset: game data may not reflect the new rank
+    };
+    const { error } = await sb.from('users').update(update).eq('id', userId);
+    if (error) throw error;
+
+    await sb.from('rank_history').insert({ user_id: userId, rank, rank_score: score });
+  },
+
+  // Called by rank-calibrate.js response handler after a qualifying 9x9 game.
+  async calibrateRank(userId, newScore, newGamesCalibrated) {
+    const newRank = Rank.scoreToRank(newScore);
+    const rankConfidence = newGamesCalibrated >= 5 ? 'high' : 'low';
+    const update = {
+      rank_score: newScore,
+      current_rank: newRank,
+      games_calibrated: newGamesCalibrated,
+      rank_confidence: rankConfidence,
+    };
+    const { error } = await sb.from('users').update(update).eq('id', userId);
+    if (error) throw error;
+
+    await sb.from('rank_history').insert({ user_id: userId, rank: newRank, rank_score: newScore });
   },
 
   async markAssessmentDone(userId) {
@@ -187,6 +219,21 @@ const Rank = {
       const dan = Math.min(9, Math.floor((score - 3000) / 200) + 1);
       return `${dan} dan`;
     }
+  },
+
+  // Map score to the rough 5-bucket system used when confidence is 'low'.
+  getBucket(score) {
+    if (score < 400)  return '30\u201326 kyu';
+    if (score < 900)  return '25\u201321 kyu';
+    if (score < 1400) return '20\u201316 kyu';
+    if (score < 2000) return '15\u201310 kyu';
+    return '9 kyu and above';
+  },
+
+  // Return the rank string to display in the UI.
+  // Uses specific rank when confidence='high'; rough bucket otherwise.
+  displayRank(currentRank, rankScore, rankConfidence) {
+    return rankConfidence === 'high' ? currentRank : this.getBucket(rankScore);
   },
 
   // Points awarded/deducted per problem

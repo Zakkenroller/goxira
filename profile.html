@@ -138,6 +138,66 @@
       border-radius: var(--r-lg);
     }
 
+    /* ── Set My Rank card ── */
+    .set-rank-card {
+      background: white;
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-lg);
+      padding: 1.25rem;
+      margin-bottom: 1.75rem;
+      animation: fadeUp 0.4s ease 0.12s both;
+    }
+
+    .set-rank-toggle {
+      display: flex; align-items: center; gap: 0.5rem;
+      margin-bottom: 1rem;
+      font-size: 0.825rem; color: var(--ink-faint);
+    }
+    .set-rank-toggle label { display: flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+
+    .rank-options {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .rank-option {
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.55rem 0.75rem;
+      border: 1.5px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      cursor: pointer; font-size: 0.875rem;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .rank-option:has(input:checked) {
+      border-color: var(--ink);
+      background: rgba(0,0,0,0.03);
+    }
+    .rank-option input[type=radio] { accent-color: var(--ink); }
+    .rank-option__label { font-weight: 500; color: var(--ink); }
+    .rank-option__desc  { font-size: 0.78rem; color: var(--ink-faint); margin-left: auto; }
+
+    .rank-select-wrap {
+      margin-bottom: 1rem;
+    }
+    .rank-select {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+      border: 1.5px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      font-size: 0.9rem; font-family: var(--font-sans);
+      color: var(--ink); background: white;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.75rem center;
+    }
+    .rank-select:focus { outline: none; border-color: var(--ink); }
+
+    .set-rank-status {
+      font-size: 0.8rem; text-align: center; min-height: 1.2em;
+      color: var(--correct);
+    }
+    .set-rank-status.error { color: #c0392b; }
+
     .bottom-nav { display: flex; }
 
     @keyframes fadeUp {
@@ -199,6 +259,58 @@
         <div class="empty-state">No rank changes recorded yet.</div>
       </div>
 
+      <!-- Set My Rank -->
+      <div class="section-header">
+        <h2>Set My Rank</h2>
+      </div>
+      <div class="set-rank-card">
+        <div class="set-rank-toggle">
+          <label>
+            <input type="checkbox" id="granular-toggle" onchange="toggleRankMode(this.checked)">
+            I know my exact rank (e.g., from OGS or KGS)
+          </label>
+        </div>
+
+        <!-- Rough scale (default) -->
+        <div id="rough-options" class="rank-options">
+          <label class="rank-option">
+            <input type="radio" name="rough-rank" value="30-26 kyu|200">
+            <span class="rank-option__label">30–26 kyu</span>
+            <span class="rank-option__desc">Absolute Beginner</span>
+          </label>
+          <label class="rank-option">
+            <input type="radio" name="rough-rank" value="25-21 kyu|700">
+            <span class="rank-option__label">25–21 kyu</span>
+            <span class="rank-option__desc">Beginner</span>
+          </label>
+          <label class="rank-option">
+            <input type="radio" name="rough-rank" value="20-16 kyu|1200">
+            <span class="rank-option__label">20–16 kyu</span>
+            <span class="rank-option__desc">Novice</span>
+          </label>
+          <label class="rank-option">
+            <input type="radio" name="rough-rank" value="15-10 kyu|1750">
+            <span class="rank-option__label">15–10 kyu</span>
+            <span class="rank-option__desc">Advanced DDK</span>
+          </label>
+          <label class="rank-option">
+            <input type="radio" name="rough-rank" value="9 kyu and above|2200">
+            <span class="rank-option__label">9 kyu and above</span>
+            <span class="rank-option__desc">Experienced</span>
+          </label>
+        </div>
+
+        <!-- Granular scale (hidden by default) -->
+        <div id="granular-options" class="rank-select-wrap" style="display:none">
+          <select class="rank-select" id="granular-rank-select"></select>
+        </div>
+
+        <button class="btn btn--primary btn--full" onclick="saveManualRank()" id="save-rank-btn">
+          Save Rank
+        </button>
+        <p class="set-rank-status" id="set-rank-status"></p>
+      </div>
+
       <!-- Account -->
       <div class="section-header">
         <h2>Account</h2>
@@ -248,26 +360,80 @@
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script>
+    let currentUserId = null;
+
+    // ── Granular rank dropdown ────────────────────────────────────
+    function buildGranularOptions() {
+      const sel = document.getElementById('granular-rank-select');
+      const opts = [];
+      for (let k = 30; k >= 1; k--) opts.push([`${k} kyu`, (30 - k) * 100]);
+      for (let d = 1; d <= 9; d++) opts.push([`${d} dan`, 3000 + (d - 1) * 200]);
+      sel.innerHTML = opts.map(([label, score]) =>
+        `<option value="${score}">${label}</option>`
+      ).join('');
+    }
+
+    function toggleRankMode(isGranular) {
+      document.getElementById('rough-options').style.display = isGranular ? 'none' : 'flex';
+      document.getElementById('granular-options').style.display = isGranular ? 'block' : 'none';
+      document.getElementById('set-rank-status').textContent = '';
+    }
+
+    async function saveManualRank() {
+      if (!currentUserId) return;
+      const btn = document.getElementById('save-rank-btn');
+      const statusEl = document.getElementById('set-rank-status');
+      const isGranular = document.getElementById('granular-toggle').checked;
+
+      let rank, score;
+      if (isGranular) {
+        score = parseInt(document.getElementById('granular-rank-select').value, 10);
+        rank = Rank.scoreToRank(score);
+      } else {
+        const sel = document.querySelector('input[name="rough-rank"]:checked');
+        if (!sel) { statusEl.textContent = 'Please select a level.'; statusEl.className = 'set-rank-status error'; return; }
+        const [r, s] = sel.value.split('|');
+        rank = r; score = parseInt(s, 10);
+      }
+
+      btn.disabled = true;
+      statusEl.textContent = '';
+      try {
+        await UserDB.setManualRank(currentUserId, rank, score, isGranular);
+        document.getElementById('profile-rank').textContent = Rank.displayRank(rank, score, isGranular ? 'high' : 'low');
+        statusEl.textContent = 'Rank saved.';
+        statusEl.className = 'set-rank-status';
+      } catch(e) {
+        statusEl.textContent = 'Could not save. Please try again.';
+        statusEl.className = 'set-rank-status error';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     async function init() {
       const session = await Auth.getSession();
       if (!session) { location.href = 'auth.html'; return; }
 
-      const userId = session.user.id;
-      const profile = await UserDB.getProfile(userId);
+      currentUserId = session.user.id;
+      const profile = await UserDB.getProfile(currentUserId);
       if (!profile) { location.href = 'auth.html'; return; }
+
+      buildGranularOptions();
 
       // Hero
       const initial = (profile.display_name || 'S')[0].toUpperCase();
       document.getElementById('avatar-initial').textContent = initial;
       document.getElementById('profile-name').textContent = profile.display_name;
-      document.getElementById('profile-rank').textContent = profile.current_rank;
+      document.getElementById('profile-rank').textContent =
+        Rank.displayRank(profile.current_rank, profile.rank_score, profile.rank_confidence);
 
       // Stats
       document.getElementById('stat-score').textContent = profile.rank_score;
 
       const [{ data: attempts }, { data: games }] = await Promise.all([
-        sb.from('problem_attempts').select('id, solved').eq('user_id', userId),
-        sb.from('saved_games').select('id').eq('user_id', userId),
+        sb.from('problem_attempts').select('id, solved').eq('user_id', currentUserId),
+        sb.from('saved_games').select('id').eq('user_id', currentUserId),
       ]);
       const solved = (attempts || []).filter(a => a.solved).length;
       document.getElementById('stat-solved').textContent = solved;
@@ -277,7 +443,7 @@
       const { data: history } = await sb
         .from('rank_history')
         .select('rank, rank_score, recorded_at')
-        .eq('user_id', userId)
+        .eq('user_id', currentUserId)
         .order('recorded_at', { ascending: false })
         .limit(10);
 

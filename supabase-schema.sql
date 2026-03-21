@@ -148,6 +148,16 @@ create policy "Problems: read for authenticated" on public.tsumego_problems
 --   [{ turnNumber, winrate, scoreLead }, ...]  (winrate from Black's perspective)
 --   Written by play.html at game-save time from katago-move.js responses.
 --   Lets the review page render the winrate chart without re-running KataGo.
+--
+--   ALTER TABLE public.users ADD COLUMN IF NOT EXISTS rank_confidence TEXT NOT NULL DEFAULT 'low'
+--     CHECK (rank_confidence IN ('low', 'high'));
+--   ALTER TABLE public.users ADD COLUMN IF NOT EXISTS games_calibrated INTEGER NOT NULL DEFAULT 0;
+--
+-- rank_confidence: 'low' = show rough bucket (e.g., "25-21 kyu"); 'high' = show specific rank.
+--   Set to 'low' by questionnaire or manual rough selection.
+--   Set to 'high' by manual granular selection or after 5 qualifying 9x9 games.
+-- games_calibrated: count of completed 9x9 standard-Go games used for winrate-swing calibration.
+--   Incremented by rank-calibrate.js. When it reaches 5, rank_confidence flips to 'high'.
 
 -- ── Spaced Repetition Schedule ────────────────────────────────────────────
 -- One row per (user, problem). Tracks SM-2 state for adaptive review scheduling.
