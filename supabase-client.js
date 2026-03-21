@@ -111,16 +111,26 @@ const UserDB = {
   // trust it immediately and set confidence='high'. Rough bucket → confidence stays 'low'.
   async setManualRank(userId, rank, score, isGranular) {
     const confidence = isGranular ? 'high' : 'low';
-    const update = {
+    let { error } = await sb.from('users').update({
       current_rank: rank,
       rank_score: score,
       rank_confidence: confidence,
       games_calibrated: 0, // reset: game data may not reflect the new rank
-    };
-    const { error } = await sb.from('users').update(update).eq('id', userId);
+    }).eq('id', userId);
+
+    // Fall back to base columns if extended columns don't exist in this DB
+    if (error) {
+      console.warn('Full rank update failed, trying minimal update:', error.message);
+      ({ error } = await sb.from('users').update({
+        current_rank: rank,
+        rank_score: score,
+      }).eq('id', userId));
+    }
+
     if (error) throw error;
 
-    await sb.from('rank_history').insert({ user_id: userId, rank, rank_score: score });
+    const { error: histError } = await sb.from('rank_history').insert({ user_id: userId, rank, rank_score: score });
+    if (histError) console.error('rank_history insert failed:', histError);
   },
 
   // Called by rank-calibrate.js response handler after a qualifying 9x9 game.
