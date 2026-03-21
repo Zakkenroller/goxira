@@ -542,11 +542,12 @@
       document.getElementById('setup-screen').style.display = 'none';
       document.getElementById('game-screen').style.display  = 'block';
 
-      // Show Atari Go capture counter
+      // Show Atari Go capture counter; hide commentary features (KataGo evals are standard-Go only)
       if (gameMode === 'atari') {
         const counter = document.getElementById('atari-captures');
         counter.style.display = '';
         updateAtariDisplay();
+        document.getElementById('hint-btn').style.display = 'none';
       }
 
       // Compute handicap from effective rank (so difficulty adjusts it too).
@@ -833,19 +834,22 @@
 
             if (checkAtariWin()) return;
 
-            setCommentary('Goxira played. Claude is analysing…');
-            // Fetch teaching commentary asynchronously — don't block the game.
-            // Pass res.analysis (already fetched above) so analyze-move skips its own KataGo call.
-            const gen = ++commentaryGen;
-            const gtpMove = coordsToGTP(move.col, move.row);
-            API.analyzeMove(
-              buildSGF(), moveNumber, boardSize,
-              userProfile?.current_rank || '20 kyu',
-              gtpMove, claudeColor, board.getStones(),
-              res || null,
-              gameMode === 'atari' ? { gameMode, captureTarget: atariTarget } : null
-            ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
-             .catch(() => {});
+            if (gameMode === 'atari') {
+              setCommentary('Goxira played. Your turn.');
+            } else {
+              setCommentary('Goxira played. Claude is analysing…');
+              // Fetch teaching commentary asynchronously — don't block the game.
+              // Pass res.analysis (already fetched above) so analyze-move skips its own KataGo call.
+              const gen = ++commentaryGen;
+              const gtpMove = coordsToGTP(move.col, move.row);
+              API.analyzeMove(
+                buildSGF(), moveNumber, boardSize,
+                userProfile?.current_rank || '20 kyu',
+                gtpMove, claudeColor, board.getStones(),
+                res || null
+              ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
+               .catch(() => {});
+            }
           }
         }
 
