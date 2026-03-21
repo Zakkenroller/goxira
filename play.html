@@ -542,11 +542,12 @@
       document.getElementById('setup-screen').style.display = 'none';
       document.getElementById('game-screen').style.display  = 'block';
 
-      // Show Atari Go capture counter
+      // Show Atari Go capture counter; hide commentary features (KataGo evals are standard-Go only)
       if (gameMode === 'atari') {
         const counter = document.getElementById('atari-captures');
         counter.style.display = '';
         updateAtariDisplay();
+        document.getElementById('hint-btn').style.display = 'none';
       }
 
       // Compute handicap from effective rank (so difficulty adjusts it too).
@@ -744,8 +745,98 @@
 
       document.getElementById('claude-thinking').classList.add('show');
 
+      // ── Atari Go: dedicated minimax engine (not KataGo) ──────────────────
+      if (gameMode === 'atari') {
+        try {
+          const res = await fetch('/.netlify/functions/atari-move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              currentStones: board.getStones(),
+              engineColor:   claudeColor,
+              boardSize,
+              atariTarget,
+              difficulty,
+              captures:      board.getCaptures(),
+            }),
+          }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+          document.getElementById('claude-thinking').classList.remove('show');
+
+          if (!res?.move) {
+            board.setInteractive(false);
+            if (engineRetryPending) {
+              engineRetryPending = false;
+              engineRetrySnapshot = null;
+              document.getElementById('retry-engine-btn').style.display = 'none';
+              gameOver = true;
+              setCommentary("Goxira's engine couldn't be reached. Your game has been saved.");
+              try {
+                const session = await Auth.getSession();
+                if (session) {
+                  const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', null);
+                  savedGameId = saved?.id ?? null;
+                }
+              } catch (_) {}
+              document.getElementById('game-over-card').classList.add('show');
+            } else {
+              engineRetryPending = true;
+              engineRetrySnapshot = snapshot;
+              setCommentary("Goxira didn't respond. Tap the button below to try again.");
+              document.getElementById('retry-engine-btn').style.display = '';
+            }
+            return;
+          }
+
+          if (engineRetryPending) {
+            engineRetryPending = false;
+            engineRetrySnapshot = null;
+            document.getElementById('retry-engine-btn').style.display = 'none';
+          }
+
+          const move = res.move;
+          if (move.col === -1 && move.row === -1) {
+            consecutivePasses++;
+            addSGFPass(claudeColor);
+            setCommentary('Goxira passes.');
+            if (consecutivePasses >= 2) { endGame('double-pass'); return; }
+          } else {
+            consecutivePasses = 0;
+            board.place(move.col, move.row, claudeColor);
+            moveNumber++;
+            addSGFMove(claudeColor, move.col, move.row);
+            updateMoveCount();
+            if (checkAtariWin()) return;
+            setCommentary('Goxira played. Your turn.');
+          }
+
+          updateTurnIndicator(playerColor);
+          board.setColor(playerColor);
+          board.setInteractive(true);
+          if (snapshot) enableUndo(snapshot);
+        } catch(e) {
+          console.error('Atari engine error:', e);
+          document.getElementById('claude-thinking').classList.remove('show');
+          board.setInteractive(false);
+          if (engineRetryPending) {
+            engineRetryPending = false;
+            engineRetrySnapshot = null;
+            document.getElementById('retry-engine-btn').style.display = 'none';
+            gameOver = true;
+            setCommentary('Goxira ran into an error. Use "New" to start a fresh game.');
+            document.getElementById('game-over-card').classList.add('show');
+          } else {
+            engineRetryPending = true;
+            engineRetrySnapshot = snapshot;
+            setCommentary('Goxira ran into a network error. Tap the button below to try again.');
+            document.getElementById('retry-engine-btn').style.display = '';
+          }
+        }
+        return; // don't fall through to KataGo
+      }
+
       try {
-        // KataGo is the only engine. If it is unavailable, we stop cleanly
+        // KataGo is the only engine for standard Go. If it is unavailable, we stop cleanly
         // rather than substituting Claude or a random move — both corrupt the game record.
         const movePayload = JSON.stringify({
           sgf: buildSGF(), color: claudeColor, boardSize,
@@ -833,19 +924,22 @@
 
             if (checkAtariWin()) return;
 
-            setCommentary('Goxira played. Claude is analysing…');
-            // Fetch teaching commentary asynchronously — don't block the game.
-            // Pass res.analysis (already fetched above) so analyze-move skips its own KataGo call.
-            const gen = ++commentaryGen;
-            const gtpMove = coordsToGTP(move.col, move.row);
-            API.analyzeMove(
-              buildSGF(), moveNumber, boardSize,
-              userProfile?.current_rank || '20 kyu',
-              gtpMove, claudeColor, board.getStones(),
-              res || null,
-              gameMode === 'atari' ? { gameMode, captureTarget: atariTarget } : null
-            ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
-             .catch(() => {});
+            if (gameMode === 'atari') {
+              setCommentary('Goxira played. Your turn.');
+            } else {
+              setCommentary('Goxira played. Claude is analysing…');
+              // Fetch teaching commentary asynchronously — don't block the game.
+              // Pass res.analysis (already fetched above) so analyze-move skips its own KataGo call.
+              const gen = ++commentaryGen;
+              const gtpMove = coordsToGTP(move.col, move.row);
+              API.analyzeMove(
+                buildSGF(), moveNumber, boardSize,
+                userProfile?.current_rank || '20 kyu',
+                gtpMove, claudeColor, board.getStones(),
+                res || null
+              ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
+               .catch(() => {});
+            }
           }
         }
 
