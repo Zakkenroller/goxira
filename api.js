@@ -40,16 +40,20 @@ const API = (() => {
     evaluateMove(problem, col, row, attemptNumber, rank) {
       return post('evaluate-move', { problem, col, row, attemptNumber, rank });
     },
-    analyzeMove(sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis) {
-      return post('analyze-move', { sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis });
+    analyzeMove(sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis, atariContext = null) {
+      const body = { sgf, moveNumber, boardSize, rank, move, playerColor, currentStones, precomputedAnalysis };
+      if (atariContext) Object.assign(body, atariContext);
+      return post('analyze-move', body);
     },
     gameSummary(sgf, boardSize, rank, playerColor, turns = null) {
       const body = { sgf, boardSize, rank, playerColor };
       if (turns?.length) body.turns = turns;
       return post('game-summary', body);
     },
-    getHint(sgf, boardSize, rank, playerColor, currentStones, moveNumber) {
-      return post('game-hint', { sgf, boardSize, rank, playerColor, currentStones, moveNumber });
+    getHint(sgf, boardSize, rank, playerColor, currentStones, moveNumber, atariContext = null) {
+      const body = { sgf, boardSize, rank, playerColor, currentStones, moveNumber };
+      if (atariContext) Object.assign(body, atariContext);
+      return post('game-hint', body);
     },
     ogsSearch(username) {
       return post('ogs-import', { action: 'search', username });

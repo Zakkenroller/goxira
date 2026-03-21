@@ -51,7 +51,9 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   try {
-    const { sgf, boardSize, rank, playerColor, currentStones, moveNumber } = JSON.parse(event.body);
+    const { sgf, boardSize, rank, playerColor, currentStones, moveNumber, gameMode, captureTarget } = JSON.parse(event.body);
+    const isAtari = gameMode === 'atari';
+    const atariContext = isAtari ? `\nThis is an Atari Go game (first to capture ${captureTarget} stone${captureTarget === 1 ? '' : 's'} wins). Focus commentary on capturing opportunities and defending against atari.` : '';
 
     const katago = await katagoEval(sgf, playerColor, boardSize, rank);
 
@@ -98,7 +100,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 200,
-        system: `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
+        system: `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.${atariContext}
 GROUNDING RULES:
 - Reference ONLY the KataGo data provided. Do NOT invent variations or suggest moves.
 - Do NOT reveal exact coordinates or intersection names to the student — guide them toward the right area of the board using directional language (e.g., "the left side", "the upper-right corner").
