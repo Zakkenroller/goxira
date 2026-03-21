@@ -55,7 +55,9 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   try {
-    const { moveNumber, boardSize, rank, move, playerColor, sgf, precomputedAnalysis, currentStones } = JSON.parse(event.body);
+    const { moveNumber, boardSize, rank, move, playerColor, sgf, precomputedAnalysis, currentStones, gameMode, captureTarget } = JSON.parse(event.body);
+    const isAtari = gameMode === 'atari';
+    const atariContext = isAtari ? `\nThis is an Atari Go game (first to capture ${captureTarget} stone${captureTarget === 1 ? '' : 's'} wins). Commentary should relate to capturing threats and atari defense.` : '';
 
     const toPlayWord = playerColor === 'B' ? 'Black' : 'White';
 
@@ -120,7 +122,7 @@ exports.handler = async (event) => {
         ? `- You have been given the complete list of current stones above. Do NOT reference any intersection as containing a stone unless it appears in that list. The continuation sequence shows future moves, not existing stones.`
         : `- You do NOT know which stones are on the board. Do not reference specific intersections by coordinate. Describe threats in general terms (e.g., "cuts off your group", "threatens the corner") only.`;
 
-      systemPrompt = `You are a Go teaching assistant describing Goxira's move to the student. Use ONLY the data provided — the win rate and KataGo's expected continuation. Do not try to "explain the move" beyond what the data directly shows.
+      systemPrompt = `You are a Go teaching assistant describing Goxira's move to the student. Use ONLY the data provided — the win rate and KataGo's expected continuation. Do not try to "explain the move" beyond what the data directly shows.${atariContext}
 
 GROUNDING RULES:
 - State the student's winning chances using the exact number given. Do not editorialize ("very difficult", "hopeless", etc.).
@@ -145,7 +147,7 @@ ${pvStr}
 Describe the situation to the student using only the data above.`;
     } else {
       // KataGo unavailable — honest fallback with generic thematic commentary only.
-      systemPrompt = `You are a Go tutor offering educational commentary on a student's game. The position analysis engine is currently offline, so you cannot evaluate whether this specific move was good or bad.
+      systemPrompt = `You are a Go tutor offering educational commentary on a student's game. The position analysis engine is currently offline, so you cannot evaluate whether this specific move was good or bad.${atariContext}
 KataGo engine data is not available for this position. You may ONLY describe what the move physically does on the board (e.g., "this is an approach move to the corner") and what strategic themes are typically associated with this type of move. Do NOT estimate whether this move is strategically good or bad. Do NOT invent win rates or suggest specific alternative moves. Be honest that position-specific analysis requires the engine, which is currently offline.
 Under 100 words. No markdown. Plain conversational language.`;
 

@@ -210,6 +210,29 @@
     }
 
     .bottom-nav { display: flex; }
+
+    /* Atari Go capture counter */
+    .atari-captures {
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+      padding: 0.4rem 0.875rem;
+      background: var(--paper-warm);
+      border: 1px solid var(--paper-deep);
+      border-radius: var(--r-md);
+      font-size: 0.8rem; font-family: var(--font-serif);
+      color: var(--ink-light);
+      margin-bottom: 0.875rem;
+    }
+    .atari-captures__progress {
+      display: inline-flex; gap: 3px; align-items: center;
+    }
+    .atari-captures__pip {
+      width: 10px; height: 10px; border-radius: 50%;
+      border: 1.5px solid currentColor; opacity: 0.3;
+      transition: opacity 0.2s, background 0.2s;
+    }
+    .atari-captures__pip.filled { opacity: 1; background: currentColor; }
+    .atari-captures__player { color: var(--ink); }
+    .atari-captures__goxira { color: var(--ink-faint); }
   </style>
 </head>
 <body>
@@ -262,13 +285,31 @@
 
         <div class="option-group">
           <p class="option-group__label">Difficulty</p>
-          <div class="option-pills">
+          <div class="option-pills" id="diff-pills">
             <button class="option-pill selected" data-diff="auto" onclick="selectDiff(this)">Auto</button>
             <button class="option-pill" data-diff="match" onclick="selectDiff(this)">Match my rank</button>
             <button class="option-pill" data-diff="easier" onclick="selectDiff(this)">Easier</button>
             <button class="option-pill" data-diff="harder" onclick="selectDiff(this)">Harder</button>
           </div>
           <p class="option-note" id="auto-diff-note">Opponent strength varies each game — you'll win some and lose some.</p>
+        </div>
+
+        <div class="option-group">
+          <p class="option-group__label">Game Mode</p>
+          <div class="option-pills">
+            <button class="option-pill selected" data-mode="standard" onclick="selectMode(this)">Standard Go</button>
+            <button class="option-pill" data-mode="atari" onclick="selectMode(this)">Atari Go</button>
+          </div>
+          <p class="option-note" id="atari-mode-note" style="display:none">First to capture the target number of stones wins. No territory counting — pure fighting!</p>
+        </div>
+
+        <div class="option-group" id="capture-target-group" style="display:none">
+          <p class="option-group__label">First to capture</p>
+          <div class="option-pills">
+            <button class="option-pill selected" data-target="1" onclick="selectCaptureTarget(this)">1 stone</button>
+            <button class="option-pill" data-target="3" onclick="selectCaptureTarget(this)">3 stones</button>
+            <button class="option-pill" data-target="5" onclick="selectCaptureTarget(this)">5 stones</button>
+          </div>
         </div>
 
         <button class="btn btn--primary btn--full btn--lg" onclick="startGame()">
@@ -295,6 +336,16 @@
         </div>
 
         <div class="board-container" id="board-container"></div>
+
+        <div class="atari-captures" id="atari-captures" style="display:none">
+          <span class="atari-captures__player">
+            You: <span class="atari-captures__progress" id="atari-you-pips"></span>
+          </span>
+          <span style="color:var(--ink-faint);font-size:0.7rem">captures</span>
+          <span class="atari-captures__goxira">
+            Goxira: <span class="atari-captures__progress" id="atari-opp-pips"></span>
+          </span>
+        </div>
 
         <div class="claude-thinking" id="claude-thinking">
           <span class="loader" style="width:14px;height:14px;border-width:2px;color:var(--ink-faint)"></span>
@@ -399,6 +450,8 @@
     let handicapStones    = []; // GTP coordinate strings for Black's pre-placed handicap stones
     let humanSLEnabled    = false; // true when katago-service has the human SL model loaded
     let turnHistory       = []; // [{turnNumber, winrate, scoreLead}] collected from katago-move responses
+    let gameMode          = 'standard'; // 'standard' | 'atari'
+    let atariTarget       = 1;          // 1 | 3 | 5 — capture target for Atari Go
 
     async function init() {
       const session = await Auth.getSession();
@@ -432,14 +485,60 @@
       if (note) note.style.display = difficulty === 'auto' ? '' : 'none';
     }
 
+    function selectMode(el) {
+      document.querySelectorAll('[data-mode]').forEach(e => e.classList.remove('selected'));
+      el.classList.add('selected');
+      gameMode = el.dataset.mode;
+      const isAtari = gameMode === 'atari';
+      document.getElementById('capture-target-group').style.display = isAtari ? '' : 'none';
+      document.getElementById('atari-mode-note').style.display = isAtari ? '' : 'none';
+      // In Atari Go, lock board to 9×9 and hide difficulty (no handicap needed)
+      if (isAtari) {
+        boardSize = 9;
+        document.querySelectorAll('[data-size]').forEach(e => {
+          e.classList.toggle('selected', e.dataset.size === '9');
+          e.disabled = true;
+        });
+        document.getElementById('diff-pills').style.opacity = '0.4';
+        document.getElementById('diff-pills').style.pointerEvents = 'none';
+      } else {
+        document.querySelectorAll('[data-size]').forEach(e => { e.disabled = false; });
+        document.getElementById('diff-pills').style.opacity = '';
+        document.getElementById('diff-pills').style.pointerEvents = '';
+      }
+    }
+
+    function selectCaptureTarget(el) {
+      document.querySelectorAll('[data-target]').forEach(e => e.classList.remove('selected'));
+      el.classList.add('selected');
+      atariTarget = parseInt(el.dataset.target);
+    }
+
     async function startGame() {
       if (difficulty === 'auto') autoOffset = pickAutoOffset();
+      // Re-read game mode and capture target (in case user changed them)
+      const modeActive = document.querySelector('[data-mode].selected');
+      if (modeActive) gameMode = modeActive.dataset.mode;
+      if (gameMode === 'atari') {
+        boardSize = 9;
+        const targetActive = document.querySelector('[data-target].selected');
+        if (targetActive) atariTarget = parseInt(targetActive.dataset.target);
+      }
+
       document.getElementById('setup-screen').style.display = 'none';
       document.getElementById('game-screen').style.display  = 'block';
 
+      // Show Atari Go capture counter
+      if (gameMode === 'atari') {
+        const counter = document.getElementById('atari-captures');
+        counter.style.display = '';
+        updateAtariDisplay();
+      }
+
       // Compute handicap from effective rank (so difficulty adjusts it too).
       // Skip when humanSL is active — the engine already plays at the player's rank level.
-      const handicapCount = humanSLEnabled ? 0 : rankToHandicap(getEffectiveRank());
+      // Skip for Atari Go — handicap stones are inappropriate for a capture-race variant.
+      const handicapCount = (humanSLEnabled || gameMode === 'atari') ? 0 : rankToHandicap(getEffectiveRank());
       handicapStones = (HANDICAP_POSITIONS[boardSize] ?? [])[Math.min(handicapCount, 9)] ?? [];
       if (handicapStones.length > 0) {
         playerColor = 'B';
@@ -541,6 +640,38 @@
       return false;
     }
 
+    // ── Atari Go helpers ─────────────────────────────────────────
+    function updateAtariDisplay() {
+      if (gameMode !== 'atari' || !board) return;
+      const caps = board.getCaptures();
+      const youCaps = playerColor === 'B' ? caps.B : caps.W;
+      const oppCaps = claudeColor === 'B' ? caps.B : caps.W;
+
+      function renderPips(containerId, count, colorClass) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        el.innerHTML = '';
+        for (let i = 0; i < atariTarget; i++) {
+          const pip = document.createElement('span');
+          pip.className = `atari-captures__pip ${colorClass}${i < count ? ' filled' : ''}`;
+          el.appendChild(pip);
+        }
+      }
+      renderPips('atari-you-pips', youCaps, 'atari-captures__player');
+      renderPips('atari-opp-pips', oppCaps, 'atari-captures__goxira');
+    }
+
+    function checkAtariWin() {
+      if (gameMode !== 'atari') return false;
+      const caps = board.getCaptures();
+      const youCaps = playerColor === 'B' ? caps.B : caps.W;
+      const oppCaps = claudeColor === 'B' ? caps.B : caps.W;
+      updateAtariDisplay();
+      if (youCaps >= atariTarget) { endGame('atari-win'); return true; }
+      if (oppCaps >= atariTarget) { endGame('atari-loss'); return true; }
+      return false;
+    }
+
     // ── Player move ──────────────────────────────────────────────
     async function onPlayerMove(col, row) {
       if (gameOver) return;
@@ -561,6 +692,9 @@
       moveNumber++;
       addSGFMove(playerColor, col, row);
       updateMoveCount();
+
+      if (checkAtariWin()) return;
+
       updateTurnIndicator(claudeColor);
       commentaryGen++;
       setCommentary('…');
@@ -675,6 +809,9 @@
             moveNumber++;
             addSGFMove(claudeColor, move.col, move.row);
             updateMoveCount();
+
+            if (checkAtariWin()) return;
+
             setCommentary('Goxira played. Claude is analysing…');
             // Fetch teaching commentary asynchronously — don't block the game.
             // Pass res.analysis (already fetched above) so analyze-move skips its own KataGo call.
@@ -684,7 +821,8 @@
               buildSGF(), moveNumber, boardSize,
               userProfile?.current_rank || '20 kyu',
               gtpMove, claudeColor, board.getStones(),
-              res || null
+              res || null,
+              gameMode === 'atari' ? { gameMode, captureTarget: atariTarget } : null
             ).then(r => { if (commentaryGen === gen && r?.message) setCommentary(r.message); })
              .catch(() => {});
           }
@@ -856,6 +994,7 @@
     }
 
     function shouldTeachingPause() {
+      if (gameMode === 'atari') return false; // no teaching pause in Atari Go
       if (teachingPauseFired || teachingPauseSuppressed || gameOver) return false;
       if (moveNumber < 10) return false; // too early to pause
       return true;
@@ -929,6 +1068,24 @@
       board.setInteractive(false);
       document.getElementById('claude-thinking').classList.remove('show');
       document.getElementById('undo-btn').disabled = true;
+
+      // ── Atari Go end game ──────────────────────────────────────
+      if (reason === 'atari-win' || reason === 'atari-loss') {
+        const s = atariTarget === 1 ? '' : 's';
+        const title = reason === 'atari-win' ? 'You win!' : 'Goxira wins';
+        const msg   = reason === 'atari-win'
+          ? `You captured ${atariTarget} stone${s} — well done!`
+          : `Goxira captured ${atariTarget} stone${s} — try again!`;
+        document.getElementById('game-over-title').textContent = title;
+        document.getElementById('game-over-msg').textContent   = msg;
+        document.getElementById('game-over-card').classList.add('show');
+        // Save the game record but skip territory scoring and game summary
+        try {
+          const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play', null);
+          savedGameId = saved?.id ?? null;
+        } catch(e) { console.error('Save game error:', e); }
+        return;
+      }
 
       const title = reason === 'resign' ? 'You resigned'
         : reason === 'teaching-pause' ? 'Game review' : 'Game complete';
@@ -1111,6 +1268,7 @@
           buildSGF(), boardSize,
           userProfile?.current_rank || '20 kyu',
           playerColor, board.getStones(), moveNumber,
+          gameMode === 'atari' ? { gameMode, captureTarget: atariTarget } : null
         );
         setCommentary('💬 ' + res.commentary);
       } catch(e) {
