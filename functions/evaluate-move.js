@@ -384,7 +384,7 @@ RESPONSE STYLE (be concise, under 80 words):
 Attempt 1 wrong → Socratic hint toward the key tactical concept. Do not reveal the answer coordinate.
 Attempt 2 wrong → More direct hint using the verified facts about the correct move.
 Attempt 3+ wrong → State the correct answer and explain it using only the verified facts.
-Correct → If verified facts show captures or atari: state them precisely and explain what they mean for the group's survival. If verified facts show no captures or atari: state the move is correct and that it occupies the vital point. STOP THERE. Do NOT add speculative claims about what the opponent "might" do, "options", "ability", or probabilistic outcomes. When the data is indirect, say less — do not pad with inferences you cannot verify.`,
+Correct → If verified facts show captures or atari: state them precisely and explain what they mean for the group's survival. If verified facts show no captures or atari: state the move is correct and that it occupies the vital point. STOP THERE. Do NOT add speculative claims about what the opponent "might" do, "options", "ability", or probabilistic outcomes. When the data is indirect, say less — do not pad with inferences you cannot verify. Do NOT add "Well done!", "Great job!", or any generic praise. If the move was correct and the facts are thin, two sentences is enough.`,
         messages: [{
           role: 'user',
           content: `Problem type: ${problemTopic}. Problem: ${problem.description}
