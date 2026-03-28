@@ -134,16 +134,6 @@
       font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase;
     }
 
-    /* ── Resource hint (after correct solve) ── */
-    .resource-hint { margin-bottom: 0.75rem; }
-    .resource-hint a {
-      display: inline-flex; align-items: baseline; gap: 0.35rem;
-      font-size: 0.8rem; color: var(--accent);
-      text-decoration: none;
-    }
-    .resource-hint a:hover { text-decoration: underline; }
-    .resource-hint__channel { font-size: 0.72rem; color: var(--ink-faint); }
-
     /* ── Stats bar ── */
     .stats-bar {
       display: flex; gap: 1rem;
@@ -345,7 +335,6 @@
 
       <!-- Commentary -->
       <div class="commentary-box" id="commentary"></div>
-      <div class="resource-hint" id="resource-hint"></div>
 
       <!-- Solution -->
       <div class="solution-box" id="solution-box">
@@ -394,7 +383,6 @@
   <script src="api.js"></script>
   <script src="board.js"></script>
   <script src="glossary.js"></script>
-  <script src="resources.js"></script>
   <script>
     let currentProblem    = null;
     let board             = null;
@@ -481,7 +469,6 @@
 
       document.getElementById('commentary').className   = 'commentary-box';
       document.getElementById('solution-box').className = 'solution-box';
-      document.getElementById('resource-hint').innerHTML = '';
       document.getElementById('next-btn').style.display = 'none';
       document.getElementById('hint-btn').style.display = 'inline-flex';
       document.getElementById('skip-btn').style.display = 'inline-flex';
@@ -638,13 +625,6 @@
           board.addMarker(col, row, 'triangle');
           updatePip(thisAttempt, 'correct');
           showCommentary(res.message, 'correct');
-          const rvids = Resources.videosForProblemTopic(currentProblem.topic || '');
-          if (rvids.length) {
-            const v = rvids[0];
-            document.getElementById('resource-hint').innerHTML =
-              `<a href="${v.url}" target="_blank" rel="noopener">`
-              + `▶ ${v.label} <span class="resource-hint__channel">${v.channel}</span></a>`;
-          }
           await onSolved();
         } else {
           board.clearJudging(); // remove the judging stone — move was wrong

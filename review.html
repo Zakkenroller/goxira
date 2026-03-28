@@ -93,14 +93,6 @@
     .study-link { display: inline-block; margin-top: 0.4rem; font-size: 0.8rem; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
     .study-practice-link { display: inline-block; margin-top: 0.4rem; margin-left: 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--ink); background: var(--paper-deep); border-radius: 100px; padding: 0.2rem 0.7rem; text-decoration: none; }
 
-    /* ── Resource links (YouTube) ── */
-    .resource-links { margin-bottom: 0.75rem; }
-    .resource-links__label { display: block; font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); margin-bottom: 0.3rem; }
-    .resource-link { display: flex; align-items: baseline; gap: 0.4rem; font-size: 0.82rem; color: var(--accent); text-decoration: none; padding: 0.22rem 0; border-bottom: 1px solid var(--paper-deep); }
-    .resource-link:last-child { border-bottom: none; }
-    .resource-link:hover { text-decoration: underline; text-underline-offset: 2px; }
-    .resource-link__channel { font-size: 0.72rem; color: var(--ink-faint); flex-shrink: 0; }
-
     /* ── Key moments ── */
     .moments-title { font-size: 0.75rem; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; }
     .moment-card {
@@ -300,7 +292,6 @@
   <script src="api.js"></script>
   <script src="board.js"></script>
   <script src="glossary.js"></script>
-  <script src="resources.js"></script>
   <script>
     // Bump this (and SUMMARY_VERSION in functions/game-summary.js) when commentary logic changes.
     // Cached summaries with a lower version are ignored and regenerated automatically.
@@ -852,19 +843,6 @@
             : '')
           + ` <a href="problems.html" class="study-practice-link">Practice problems &rarr;</a>`;
         sec.appendChild(div);
-
-        // YouTube links for the identified study topic
-        const videos = Resources.videosForKeyword(summary.studyKeyword || '');
-        if (videos.length) {
-          const res = document.createElement('div');
-          res.className = 'resource-links';
-          res.innerHTML = '<span class="resource-links__label">Watch</span>'
-            + videos.map(v =>
-                `<a href="${escHtml(v.url)}" target="_blank" rel="noopener" class="resource-link">`
-                + `▶ ${escHtml(v.label)} <span class="resource-link__channel">${escHtml(v.channel)}</span></a>`
-              ).join('');
-          sec.appendChild(res);
-        }
       }
 
       // Wrap Go terms in all Claude-generated text
