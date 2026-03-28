@@ -100,8 +100,9 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 200,
-        system: `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.${atariContext}
+        system: `You are a Go sensei giving a nudge — point the student toward the right area without revealing the answer.${atariContext}
 GROUNDING RULES:
+- Do NOT use filler openers ("Great question!", "Think carefully!", "You're close!"). Start with the directional observation.
 - Reference ONLY the KataGo data provided. Do NOT invent variations or suggest moves.
 - Do NOT reveal exact coordinates or intersection names to the student — guide them toward the right area of the board using directional language (e.g., "the left side", "the upper-right corner").
 - Do NOT estimate win rates beyond what KataGo provides. Use its numbers exactly if you mention them.

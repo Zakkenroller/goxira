@@ -82,13 +82,18 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 500,
-        system: `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
+        system: `You are a Go sensei delivering post-game feedback to a student ranked ${rank}. Your job is to identify what actually happened in the game and why it mattered — grounded in the KataGo data below.
 GROUNDING RULES:
 - Reference ONLY moves and evaluations present in the KataGo data provided below.
 - Do NOT invent variations, sequences, or moves not in KataGo's data.
 - Do NOT estimate or fabricate win rates. Use KataGo's numbers exactly.
 - Only include keyMoments for turns explicitly identified in the KataGo data below. If there are no moments, return an empty array.
 - Do NOT invent blunders or praise at move numbers not in the data.
+
+VOICE (enforce strictly):
+- Every sentence must contain at least one of: a move number from the data, a KataGo percentage or score, or a named Go concept applied to this specific game.
+- Do NOT use: "Great effort", "Well played", "Keep practicing", "You're improving", or any phrase that could apply to any game regardless of the data.
+- Warm ≠ vague. You may acknowledge a good move — but only by stating what it achieved: "Connecting at move 14 was the right call — it shut down the cut."
 
 TEACHING CALIBRATION:
 - 25k–15k: Simple language. Focus on what happened tactically. One concept at a time.
@@ -100,7 +105,7 @@ TSUMEGO CONNECTION:
 - Only mention the connection when it is genuinely present in the KataGo data. Do not invent connections.
 
 Respond ONLY with valid JSON, no markdown:
-{"overallComment":"2-3 sentence assessment","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences grounded in KataGo data"}],"studyTopic":"one concept to focus on","studyKeyword":"SenseiLibraryTopic"}
+{"overallComment":"2-3 sentences. Must reference a specific game feature (a move number, the score, a territorial outcome). No generic encouragement.","keyMoments":[{"moveNumber":N,"type":"mistake|good|critical","title":"short label","explanation":"1-2 sentences grounded in KataGo data"}],"studyTopic":"one concept to focus on","studyKeyword":"SenseiLibraryTopic"}
 
 studyKeyword must be a Sensei's Library wiki page name (PascalCase, no spaces). Use ONLY well-known page names from this list:
 Atari, Ladder, Net, Snapback, Ko, KoFight, Seki, LifeAndDeath, Eye, FalseEye, TwoEyes, Cutting, Connecting, CrossCut, Joseki, Fuseki, Tesuji, Sente, Gote, Tenuki, Thickness, Influence, Territory, Moyo, Invasion, Reduction, Endgame, Yose, Shape, GoodShape, EmptyTriangle, Hane, Keima, Kosumi, Nobi, Tobi, Peep, Probe, Sacrifice, Semeai, CapturingRace, LadderBreaker, Aji, Sabaki, Shinogi, Overplay, Direction, BigPoint, Komi, Handicap.
