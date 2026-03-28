@@ -88,13 +88,11 @@ All major features are implemented and deployed:
 ## Known Issues
 
 ### Mobile Stone Placement UX
-Remaining issues are in the touch interaction layer (`board.js`).
+No known remaining issues. All touch interaction issues have been resolved:
 
-- **Ghost stone slightly undersized**: The ghost stone has a 44px minimum touch target but may still read as slightly small on some devices. Verify on physical hardware.
-- **Cannot abandon placement**: There is no way to cancel a stone placement in progress. The intended behavior is: dragging the ghost stone fully off the visible board area cancels the placement. This is not yet implemented.
-
-The following issues from earlier notes are **resolved**:
-- ~~No placement confirmation~~ — Fixed: a pending stone with an animated progress ring now appears immediately on finger-lift, followed by a "judging" indicator while the API evaluates.
+- ~~Ghost stone slightly undersized~~ — Fixed: radius bumped from 44px to 52px; ghost stone now lifts 32px above the fingertip contact point so the targeted intersection is visible.
+- ~~Cannot abandon placement~~ — Fixed: tapping anywhere outside the board SVG during the 500ms pending countdown cancels the placement. Dragging the finger off-board during the ghost phase also cancels (was already implemented).
+- ~~No placement confirmation~~ — Fixed: a pending stone with an animated progress ring appears immediately on finger-lift, followed by a "judging" indicator while the API evaluates.
 - ~~Off-screen placement not blocked~~ — Fixed: placement is rejected if the touch point is outside the viewport.
 
 ### Streak Tracking
