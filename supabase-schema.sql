@@ -149,6 +149,14 @@ create policy "Problems: read for authenticated" on public.tsumego_problems
 --   Written by play.html at game-save time from katago-move.js responses.
 --   Lets the review page render the winrate chart without re-running KataGo.
 --
+--   ALTER TABLE public.saved_games ADD COLUMN IF NOT EXISTS outcome TEXT;
+--   ALTER TABLE public.saved_games ADD COLUMN IF NOT EXISTS player_color TEXT;
+--
+-- outcome: How the game ended. One of: 'completed', 'resigned', 'abandoned', 'paused'.
+--   Null for games saved before this migration.
+-- player_color: The human player's stone color, 'B' or 'W'.
+--   Null for games saved before this migration.
+--
 --   ALTER TABLE public.users ADD COLUMN IF NOT EXISTS rank_confidence TEXT NOT NULL DEFAULT 'low'
 --     CHECK (rank_confidence IN ('low', 'high'));
 --   ALTER TABLE public.users ADD COLUMN IF NOT EXISTS games_calibrated INTEGER NOT NULL DEFAULT 0;
