@@ -22,7 +22,19 @@
     }
     .game-card:active { transform: scale(0.98); }
     .game-card__meta { font-size: 0.8rem; color: var(--ink-faint); margin-top: 2px; }
-    .game-card__arrow { color: var(--ink-faint); font-size: 1.1rem; }
+    .game-card__arrow { color: var(--ink-faint); font-size: 1.1rem; flex-shrink: 0; margin-left: 0.25rem; }
+    .game-card__outcome { font-size: 0.72rem; font-weight: 500; margin-left: 0.4rem;
+      padding: 0.1rem 0.4rem; border-radius: 99px; }
+    .game-card__outcome--completed { background: rgba(45,106,79,0.1); color: var(--correct); }
+    .game-card__outcome--resigned  { background: rgba(139,58,30,0.08); color: var(--accent); }
+    .game-card__outcome--abandoned { background: var(--paper-deep); color: var(--ink-faint); }
+    .game-card__outcome--paused    { background: var(--paper-deep); color: var(--ink-faint); }
+    .game-card__delete {
+      background: none; border: none; cursor: pointer;
+      color: var(--ink-faint); font-size: 1rem; padding: 0.35rem 0.4rem;
+      border-radius: var(--r-sm); flex-shrink: 0; line-height: 1;
+    }
+    .game-card__delete:hover { color: var(--wrong); background: rgba(139,26,26,0.06); }
     .empty-state {
       text-align: center; padding: 3rem 1rem;
       color: var(--ink-faint); font-size: 0.9rem;
@@ -343,15 +355,31 @@
 
       el.innerHTML = '';
       games.forEach(g => {
-        const date = new Date(g.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-        const div  = document.createElement('div');
+        const date  = new Date(g.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const moves = (g.sgf_content?.match(/;[BW]\[(?!tt\])/g) || []).length;
+        const outcomeLabels = { completed: 'Completed', resigned: 'Resigned', abandoned: 'Abandoned', paused: 'Paused' };
+        const outcomeHtml = g.outcome
+          ? `<span class="game-card__outcome game-card__outcome--${g.outcome}">${outcomeLabels[g.outcome] || g.outcome}</span>`
+          : '';
+        const div = document.createElement('div');
         div.className = 'game-card';
         div.innerHTML = `
-          <div>
-            <div style="font-size:0.9rem;font-weight:500;color:var(--ink)">${g.board_size}×${g.board_size} game</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:0.9rem;font-weight:500;color:var(--ink)">${g.board_size}×${g.board_size} · ${moves} moves${outcomeHtml}</div>
             <div class="game-card__meta">${date}</div>
           </div>
+          <button class="game-card__delete" title="Delete game">🗑</button>
           <span class="game-card__arrow">→</span>`;
+        div.querySelector('.game-card__delete').addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('Delete this game? This cannot be undone.')) return;
+          try {
+            await UserDB.deleteGame(userId, g.id);
+            div.remove();
+          } catch (_) {
+            alert('Failed to delete game.');
+          }
+        });
         div.onclick = () => { history.pushState({}, '', `review.html?id=${g.id}`); loadGame(g.id); };
         el.appendChild(div);
       });

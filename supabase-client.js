@@ -154,12 +154,28 @@ const UserDB = {
     if (error) throw error;
   },
 
-  async saveGame(userId, sgf, boardSize, source, turns = null) {
+  async saveGame(userId, sgf, boardSize, source, turns = null, outcome = null, playerColor = null) {
     const row = { user_id: userId, sgf_content: sgf, board_size: boardSize, source };
-    if (turns?.length) row.turns = turns;
+    if (turns?.length)  row.turns = turns;
+    if (outcome)        row.outcome = outcome;
+    if (playerColor)    row.player_color = playerColor;
     const { data, error } = await sb.from('saved_games').insert(row).select().single();
     if (error) throw error;
     return data;
+  },
+
+  async updateGameOutcome(userId, gameId, outcome, playerColor) {
+    const { error } = await sb.from('saved_games')
+      .update({ outcome, player_color: playerColor })
+      .eq('id', gameId).eq('user_id', userId);
+    if (error) console.error('updateGameOutcome:', error);
+  },
+
+  async deleteGame(userId, gameId) {
+    const { error } = await sb.from('saved_games')
+      .delete()
+      .eq('id', gameId).eq('user_id', userId);
+    if (error) throw error;
   },
 
   async saveAiSummary(gameId, summary) {

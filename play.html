@@ -774,7 +774,7 @@
               try {
                 const session = await Auth.getSession();
                 if (session) {
-                  const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', null);
+                  const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', null, 'abandoned', playerColor);
                   savedGameId = saved?.id ?? null;
                 }
               } catch (_) {}
@@ -864,7 +864,7 @@
             try {
               const session = await Auth.getSession();
               if (session) {
-                const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null);
+                const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null, 'abandoned', playerColor);
                 savedGameId = saved?.id ?? null;
               }
             } catch(saveErr) { console.error('Save game on engine-down error:', saveErr); }
@@ -967,7 +967,7 @@
           try {
             const session = await Auth.getSession();
             if (session) {
-              const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null);
+              const saved = await UserDB.saveGame(session.user.id, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null, 'abandoned', playerColor);
               savedGameId = saved?.id ?? null;
             }
           } catch(saveErr) { console.error('Save game on error:', saveErr); }
@@ -1196,7 +1196,8 @@
         document.getElementById('game-over-card').classList.add('show');
         // Save the game record but skip territory scoring and game summary
         try {
-          const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play', null);
+          const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play', null,
+            reason === 'atari-win' || reason === 'atari-loss' ? 'completed' : 'abandoned', playerColor);
           savedGameId = saved?.id ?? null;
         } catch(e) { console.error('Save game error:', e); }
         return;
@@ -1237,8 +1238,12 @@
         });
       }
 
+      const _outcome = reason === 'resign' ? 'resigned'
+        : reason === 'teaching-pause' ? 'paused'
+        : 'completed';
       try {
-        const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play', turnHistory.length ? turnHistory : null);
+        const saved = await UserDB.saveGame(userId, buildSGF(), boardSize, 'live_play',
+          turnHistory.length ? turnHistory : null, _outcome, playerColor);
         savedGameId = saved.id;
       } catch(e) { console.error('Save game error:', e); }
 

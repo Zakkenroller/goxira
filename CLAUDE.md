@@ -90,7 +90,7 @@ All major features are implemented and deployed:
 ### Mobile Stone Placement UX
 No known remaining issues. All touch interaction issues have been resolved:
 
-- ~~Ghost stone slightly undersized~~ — Fixed: radius bumped from 44px to 52px; ghost stone now lifts 32px above the fingertip contact point so the targeted intersection is visible.
+- ~~Ghost stone slightly undersized~~ — Fixed: radius bumped from 44px to 52px. Ghost stone is centered on the target intersection (no vertical offset).
 - ~~Cannot abandon placement~~ — Fixed: tapping anywhere outside the board SVG during the 500ms pending countdown cancels the placement. Dragging the finger off-board during the ghost phase also cancels (was already implemented).
 - ~~No placement confirmation~~ — Fixed: a pending stone with an animated progress ring appears immediately on finger-lift, followed by a "judging" indicator while the API evaluates.
 - ~~Off-screen placement not blocked~~ — Fixed: placement is rejected if the touch point is outside the viewport.

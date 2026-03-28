@@ -126,9 +126,6 @@ const Board = (() => {
     // Minimum ghost stone radius in screen pixels for touch.
     // Targets ~2 cm diameter on a typical phone so the stone is visible above the fingertip.
     const TOUCH_GHOST_PX = 52;
-    // How far above the finger contact point to draw the ghost stone center (screen pixels).
-    // Lifts the ghost clear of the fingertip so the player can see which intersection is targeted.
-    const TOUCH_GHOST_OFFSET_PX = 32;
 
     overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
@@ -423,9 +420,6 @@ const Board = (() => {
         const vb      = svg.viewBox.baseVal;
         const scale   = (vb.height || total) / Math.max(svgRect.height, 1);
         ghostR = Math.max(CELL * 0.46, TOUCH_GHOST_PX * scale);
-        // Lift the ghost above the fingertip so the player can see the intersection.
-        // Placement still targets pos.col/pos.row — only the visual shifts up.
-        y -= TOUCH_GHOST_OFFSET_PX * scale;
       }
 
       const c = el(hoverGroup, 'circle');
