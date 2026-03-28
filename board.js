@@ -125,7 +125,10 @@ const Board = (() => {
 
     // Minimum ghost stone radius in screen pixels for touch.
     // Targets ~2 cm diameter on a typical phone so the stone is visible above the fingertip.
-    const TOUCH_GHOST_PX = 44;
+    const TOUCH_GHOST_PX = 52;
+    // How far above the finger contact point to draw the ghost stone center (screen pixels).
+    // Lifts the ghost clear of the fingertip so the player can see which intersection is targeted.
+    const TOUCH_GHOST_OFFSET_PX = 32;
 
     overlay.addEventListener('touchstart', (e) => {
       if (!interactive) return;
@@ -189,6 +192,17 @@ const Board = (() => {
       if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; pendingPos = null; }
       clearHover();
     });
+
+    // Cancel a pending stone when the player taps anywhere outside the board SVG.
+    // This gives an obvious escape hatch during the 500ms confirmation countdown.
+    document.addEventListener('touchstart', (e) => {
+      if (!pendingTimer) return;
+      if (svg.contains(e.target) || overlay.contains(e.target)) return;
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+      pendingPos   = null;
+      clearHover();
+    }, { passive: true });
 
     // ── Private helpers ──
     function px(i) { return PADDING + i * CELL; }
@@ -393,13 +407,14 @@ const Board = (() => {
       });
     }
 
-    // isTouch: when true, ensure the ghost is large enough to peek out around a fingertip.
+    // isTouch: when true, ensure the ghost is large enough to peek out around a fingertip,
+    // and lift it above the contact point so the player can see the targeted intersection.
     function drawHover(pos, isTouch = false) {
       hoverGroup.innerHTML = '';
       const key = `${pos.col},${pos.row}`;
       if (stones[key]) return;
       const x = px(pos.col);
-      const y = px(pos.row);
+      let   y = px(pos.row);
       let ghostR = CELL * 0.46;
 
       if (isTouch) {
@@ -408,6 +423,9 @@ const Board = (() => {
         const vb      = svg.viewBox.baseVal;
         const scale   = (vb.height || total) / Math.max(svgRect.height, 1);
         ghostR = Math.max(CELL * 0.46, TOUCH_GHOST_PX * scale);
+        // Lift the ghost above the fingertip so the player can see the intersection.
+        // Placement still targets pos.col/pos.row — only the visual shifts up.
+        y -= TOUCH_GHOST_OFFSET_PX * scale;
       }
 
       const c = el(hoverGroup, 'circle');
