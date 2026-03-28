@@ -102,3 +102,10 @@ The streak display on the home dashboard is stubbed (shows `—`). The `problem_
 
 ### supabase-schema.sql Is Incomplete
 The `tsumego_problems` table (the problem library) was added directly in Supabase and is not reflected in the committed schema file. If someone self-hosts using only the schema file, they won't have the problems table. The schema file should be updated to include the table definition and, ideally, instructions for loading the problem data.
+
+## Requirements Document
+
+See `REQUIREMENTS.md` for full product requirements, priority tiers, 
+commentary voice spec, and roadmap. When working on any feature, 
+check REQUIREMENTS.md to confirm it aligns with the stated priorities 
+and voice specification.
