@@ -435,21 +435,23 @@
       loadAnalysis(game, boardSize, playerColor);
     }
 
-    // ── Game analysis (with retry) ───────────────────────────────
-    function loadAnalysis(game, boardSize, playerColor) {
+    // ── Game analysis — three-stage pipeline ─────────────────────
+    // Stage 1: render winrate chart instantly from cached turns (no API call).
+    // Stage 2: call game-katago.js for KataGo analysis + key moment lookups.
+    // Stage 3: call game-comment.js for Claude commentary once KataGo data lands.
+    async function loadAnalysis(game, boardSize, playerColor) {
       const rank = userProfile?.current_rank || '20 kyu';
       const sec = document.getElementById('analysis-section');
       const winrateWrap = document.getElementById('winrate-wrap');
 
-      // Serve cached winrate chart immediately — no API call needed.
+      // ── Stage 1: instant chart ──────────────────────────────────
       if (game.turns?.length) {
         winrateTurns = game.turns;
         if (winrateWrap) winrateWrap.parentElement.style.display = '';
         renderWinrateChart();
       }
 
-      // If both chart and commentary are cached with a real summary (not an error placeholder
-      // and not from an older version of the analysis logic), render from DB — zero API calls.
+      // If ai_summary is fresh and valid, render it — zero API calls.
       const summaryIsGood = game.ai_summary &&
         (game.ai_summary.version ?? 0) >= SUMMARY_VERSION &&
         !game.ai_summary.overallComment?.toLowerCase().includes('unavailable');
@@ -457,56 +459,84 @@
         renderAnalysis(game.ai_summary, null);
         return;
       }
-      // Bad summary cached (e.g. a previous Claude timeout was mistakenly persisted) — clear it
-      // so a fresh API call can overwrite it with a real result.
+      // Stale or bad cached summary — clear it so a fresh result overwrites it.
       if (game.ai_summary && !summaryIsGood && userId && userId === currentGameOwner) {
         UserDB.saveAiSummary(game.id, null);
       }
 
-      // Commentary not yet cached — request it from the API.
-      // Pass cached turns so game-summary.js skips the 18s KataGo full-game analyze call.
-      sec.innerHTML = '<div class="analysis-loading"><span class="loader"></span> Analysing game…</div>';
+      // ── Stage 2: KataGo analysis ────────────────────────────────
+      sec.innerHTML = '<div class="analysis-loading"><span class="loader"></span> Analysing with engine…</div>';
       if (!game.turns?.length && winrateWrap) winrateWrap.parentElement.style.display = '';
 
-      API.gameSummary(game.sgf_content, boardSize, rank, playerColor, game.turns?.length ? game.turns : null)
-        .then(data => {
-          if (currentGameId !== game.id) return; // user switched games — discard stale response
-          // Detect engine-unavailable fallback: no turns and empty keyMoments
-          const engineDown = !data.turns?.length && data.summary?.keyMoments?.length === 0
-            && data.summary?.overallComment?.toLowerCase().includes('unavailable');
-          renderAnalysis(data.summary, engineDown ? () => loadAnalysis(game, boardSize, playerColor) : null);
-          if (data.turns?.length && !game.turns?.length) {
-            winrateTurns = data.turns;
-            if (winrateWrap) winrateWrap.parentElement.style.display = '';
-            renderWinrateChart();
-            if (userId && userId === currentGameOwner) {
-              UserDB.saveTurns(game.id, data.turns);
-            }
-          } else if (!data.turns?.length && !game.turns?.length) {
-            if (winrateWrap) winrateWrap.parentElement.style.display = 'none';
-          }
-          // Persist ai_summary so pattern analysis can aggregate it later.
-          // Only save when engine was available (errorTags present) and the user owns the game.
-          if (!engineDown && data.summary?.errorTags
-              && !data.summary?.overallComment?.toLowerCase().includes('unavailable')
-              && userId && userId === currentGameOwner) {
-            UserDB.saveAiSummary(game.id, data.summary);
-          }
-        })
-        .catch(() => {
-          sec.innerHTML = '';
-          const div = document.createElement('div');
-          div.className = 'overall-comment';
-          div.textContent = 'Engine analysis failed.';
-          const btn = document.createElement('button');
-          btn.className   = 'btn btn--secondary';
-          btn.textContent = '↺ Try again';
-          btn.style.cssText = 'margin-top:0.6rem;display:block;';
-          btn.onclick = () => loadAnalysis(game, boardSize, playerColor);
-          div.appendChild(btn);
-          sec.appendChild(div);
-          if (!game.turns?.length && winrateWrap) winrateWrap.parentElement.style.display = 'none';
-        });
+      let katagoData;
+      try {
+        katagoData = await API.gameKatago(
+          game.sgf_content, boardSize, rank, playerColor,
+          game.turns?.length ? game.turns : null
+        );
+      } catch (e) {
+        if (currentGameId !== game.id) return;
+        _showAnalysisError(sec, winrateWrap, game, boardSize, playerColor);
+        return;
+      }
+
+      if (currentGameId !== game.id) return; // user switched games — discard stale response
+
+      // Render chart if turns arrived for the first time.
+      if (katagoData.turns?.length && !game.turns?.length) {
+        winrateTurns = katagoData.turns;
+        if (winrateWrap) winrateWrap.parentElement.style.display = '';
+        renderWinrateChart();
+        if (userId && userId === currentGameOwner) {
+          UserDB.saveTurns(game.id, katagoData.turns);
+        }
+      } else if (!katagoData.turns?.length && !game.turns?.length) {
+        // KataGo unavailable and no cached turns — hide chart section.
+        if (winrateWrap) winrateWrap.parentElement.style.display = 'none';
+      }
+
+      // ── Stage 3: Claude commentary ──────────────────────────────
+      sec.innerHTML = '<div class="analysis-loading"><span class="loader"></span> Generating commentary…</div>';
+
+      let commentData;
+      try {
+        commentData = await API.gameComment(
+          rank, playerColor, boardSize,
+          katagoData.turns?.length ? katagoData.turns : (game.turns ?? []),
+          katagoData.momentDetails ?? []
+        );
+      } catch (e) {
+        if (currentGameId !== game.id) return;
+        _showAnalysisError(sec, winrateWrap, game, boardSize, playerColor);
+        return;
+      }
+
+      if (currentGameId !== game.id) return;
+
+      const engineDown = !katagoData.turns?.length && !game.turns?.length;
+      renderAnalysis(commentData.summary, engineDown ? () => loadAnalysis(game, boardSize, playerColor) : null);
+
+      // Persist ai_summary for pattern aggregation. Only save when engine was available.
+      if (!engineDown && commentData.summary?.errorTags
+          && !commentData.summary?.overallComment?.toLowerCase().includes('unavailable')
+          && userId && userId === currentGameOwner) {
+        UserDB.saveAiSummary(game.id, commentData.summary);
+      }
+    }
+
+    function _showAnalysisError(sec, winrateWrap, game, boardSize, playerColor) {
+      sec.innerHTML = '';
+      const div = document.createElement('div');
+      div.className = 'overall-comment';
+      div.textContent = 'Engine analysis failed.';
+      const btn = document.createElement('button');
+      btn.className   = 'btn btn--secondary';
+      btn.textContent = '↺ Try again';
+      btn.style.cssText = 'margin-top:0.6rem;display:block;';
+      btn.onclick = () => loadAnalysis(game, boardSize, playerColor);
+      div.appendChild(btn);
+      sec.appendChild(div);
+      if (!game.turns?.length && winrateWrap) winrateWrap.parentElement.style.display = 'none';
     }
 
     // ── Share game ────────────────────────────────────────────────

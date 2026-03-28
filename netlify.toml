@@ -17,6 +17,12 @@
 [functions."game-summary"]
   timeout = 26
 
+[functions."game-katago"]
+  timeout = 26
+
+[functions."game-comment"]
+  timeout = 26
+
 [functions."analyze-move"]
   timeout = 26
 

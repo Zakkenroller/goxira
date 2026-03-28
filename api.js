@@ -50,6 +50,14 @@ const API = (() => {
       if (turns?.length) body.turns = turns;
       return post('game-summary', body);
     },
+    gameKatago(sgf, boardSize, rank, playerColor, turns = null) {
+      const body = { sgf, boardSize, rank, playerColor };
+      if (turns?.length) body.turns = turns;
+      return post('game-katago', body, 28000);
+    },
+    gameComment(rank, playerColor, boardSize, turns, momentDetails) {
+      return post('game-comment', { rank, playerColor, boardSize, turns, momentDetails }, 28000);
+    },
     getHint(sgf, boardSize, rank, playerColor, currentStones, moveNumber, atariContext = null) {
       const body = { sgf, boardSize, rank, playerColor, currentStones, moveNumber };
       if (atariContext) Object.assign(body, atariContext);
