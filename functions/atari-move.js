@@ -228,7 +228,7 @@ function minimax(stones, caps, depth, alpha, beta, isEngineMove,
 
 // Root search. Returns the best {col, row} move for engineColor.
 function findBestMove(stones, caps, engineColor, playerColor, size, target, maxDepth) {
-  const deadline = Date.now() + 7000; // 7s safety margin (Netlify limit is 10s)
+  const deadline = Date.now() + 20000; // 20s safety margin within 26s Netlify timeout
   const moves = legalMoves(stones, engineColor, size);
   if (moves.length === 0) return null;
 

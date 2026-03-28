@@ -28,3 +28,6 @@
 
 [functions."joseki-deviation"]
   timeout = 26
+
+[functions."atari-move"]
+  timeout = 26
