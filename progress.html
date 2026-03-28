@@ -98,6 +98,15 @@
     .priority-item__topic { font-size: 0.875rem; font-weight: 500; color: var(--ink); }
     .priority-item__reason { font-size: 0.8rem; color: var(--ink-faint); margin-top: 0.15rem; line-height: 1.4; }
     .priority-item__link { font-size: 0.78rem; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+    .priority-item__link--video { text-decoration: none; }
+    .priority-item__link--video:hover { text-decoration: underline; }
+
+    /* ── Book recommendations ── */
+    .resource-books { margin-top: 0.5rem; padding: 0.875rem 1rem; background: var(--paper-warm); border: 1px solid var(--paper-deep); border-radius: var(--r-md); }
+    .resource-books__label { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); margin-bottom: 0.5rem; }
+    .resource-books__item { font-size: 0.85rem; color: var(--ink-light); margin-bottom: 0.3rem; line-height: 1.4; }
+    .resource-books__item:last-child { margin-bottom: 0; }
+    .resource-books__author { font-size: 0.8rem; color: var(--ink-faint); }
 
     /* ── Progress notes ── */
     .notes-card {
@@ -278,6 +287,7 @@
   <script src="supabase-client.js"></script>
   <script src="api.js"></script>
   <script src="glossary.js"></script>
+  <script src="resources.js"></script>
   <script>
     const SENSEI_BASE = 'https://senseis.xmp.net/?';
     const MIN_GAMES   = 5;
@@ -453,8 +463,12 @@
         const list = document.createElement('div');
         list.className = 'priorities-list';
         data.studyPriorities.forEach((p, i) => {
-          const delay = (i * 0.05).toFixed(2);
-          const url   = p.senseiKeyword ? `${SENSEI_BASE}${p.senseiKeyword}` : null;
+          const delay   = (i * 0.05).toFixed(2);
+          const url     = p.senseiKeyword ? `${SENSEI_BASE}${p.senseiKeyword}` : null;
+          const videos  = Resources.videosForKeyword(p.senseiKeyword || '');
+          const videoEl = videos.length
+            ? `<a class="priority-item__link priority-item__link--video" href="${videos[0].url}" target="_blank" rel="noopener">▶ ${videos[0].label} — ${videos[0].channel}</a>`
+            : '';
           list.innerHTML += `
             <div class="priority-item" style="animation-delay:${delay}s">
               <span class="priority-num">${p.priority || i + 1}</span>
@@ -462,11 +476,24 @@
                 <p class="priority-item__topic">${p.topic}</p>
                 <p class="priority-item__reason">${p.reason || ''}</p>
                 ${url ? `<a class="priority-item__link" href="${url}" target="_blank" rel="noopener">Sensei's Library →</a>` : ''}
+                ${videoEl}
               </div>
             </div>
           `;
         });
         sec.appendChild(list);
+
+        // Book recommendations for this rank tier (shown once, not per-priority)
+        const bookTier = Resources.booksForScore(userProfile.rank_score || 0);
+        if (bookTier?.books?.length) {
+          const bookDiv = document.createElement('div');
+          bookDiv.className = 'resource-books';
+          bookDiv.innerHTML = `<p class="resource-books__label">${bookTier.label}</p>`
+            + bookTier.books.map(b =>
+                `<p class="resource-books__item"><strong>${b.title}</strong> <span class="resource-books__author">— ${b.author}</span></p>`
+              ).join('');
+          sec.appendChild(bookDiv);
+        }
       }
 
       // Wrap Go terms in Claude-generated content
