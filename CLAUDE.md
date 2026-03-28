@@ -95,9 +95,6 @@ No known remaining issues. All touch interaction issues have been resolved:
 - ~~No placement confirmation~~ — Fixed: a pending stone with an animated progress ring appears immediately on finger-lift, followed by a "judging" indicator while the API evaluates.
 - ~~Off-screen placement not blocked~~ — Fixed: placement is rejected if the touch point is outside the viewport.
 
-### Streak Tracking
-The streak display on the home dashboard is stubbed (shows `—`). The `problem_attempts` table has `created_at` timestamps sufficient to compute it — it just hasn't been wired up.
-
 ### supabase-schema.sql Is Incomplete
 The `tsumego_problems` table (the problem library) was added directly in Supabase and is not reflected in the committed schema file. If someone self-hosts using only the schema file, they won't have the problems table. The schema file should be updated to include the table definition and, ideally, instructions for loading the problem data.
 
