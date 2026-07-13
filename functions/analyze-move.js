@@ -1,5 +1,7 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
+const { callClaude } = require('./_claude');
+
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
@@ -21,17 +23,6 @@ async function katagoEval(sgf, playerColor, boardSize, rank) {
     console.error('KataGo analyze-move eval error:', e.message);
     return null;
   }
-}
-
-function formatTopMovesForPrompt(topMoves, toPlayWord, playedMove) {
-  if (!topMoves?.length) return '';
-  return topMoves.slice(0, 5).map((m, i) => {
-    const winPct = Math.round((m.winrate ?? 0) * 100);
-    const score = m.scoreLead != null ? `, score ${m.scoreLead > 0 ? '+' : ''}${m.scoreLead.toFixed(1)}` : '';
-    const pv = m.pv?.length ? ` → sequence: ${m.pv.join(', ')}` : '';
-    const marker = m.move === playedMove ? ' ← student\'s move' : '';
-    return `  ${i + 1}. ${m.move}: ${winPct}% for ${toPlayWord}${score}${pv}${marker}`;
-  }).join('\n');
 }
 
 // Convert board.getStones() object ({"col,row": "B"|"W"}) to GTP coordinate lists.
@@ -72,6 +63,7 @@ exports.handler = async (event) => {
 
     let systemPrompt;
     let userContent;
+    let fallbackMessage; // honest degraded reply if the Claude call fails
 
     if (katago) {
       const topMoves = katago.analysis?.topMoves || [];
@@ -146,6 +138,8 @@ ${boardStateStr}
 Student's winning chances: ${studentWinPct}%.${studentScoreStr}
 ${pvStr}
 Describe the situation to the student using only the data above.`;
+
+      fallbackMessage = `Your winning chances: ${studentWinPct}%.${studentScoreStr} (Move commentary is temporarily unavailable.)`;
     } else {
       // KataGo unavailable — honest fallback with generic thematic commentary only.
       systemPrompt = `You are a Go tutor offering educational commentary on a student's game. The position analysis engine is currently offline, so you cannot evaluate whether this specific move was good or bad.${atariContext}
@@ -153,25 +147,22 @@ KataGo engine data is not available for this position. You may ONLY describe wha
 Under 100 words. No markdown. Plain conversational language.`;
 
       userContent = `Student rank: ${rank}. Board: ${boardSize}x${boardSize}. Move #${moveNumber}. ${playerColor} played at ${move}. The engine is offline — give only a brief thematic observation about this type of move, and note that full analysis is unavailable.`;
+
+      fallbackMessage = 'The analysis engine and move commentary are both temporarily unavailable for this move.';
     }
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    let message;
+    try {
+      message = await callClaude({
         model: CLAUDE_MODEL,
-        max_tokens: 150,
+        maxTokens: 150,
         system: systemPrompt,
         messages: [{ role: 'user', content: userContent }],
-      }),
-    });
-
-    const data = await res.json();
-    const message = data.content[0].text;
+      });
+    } catch (claudeErr) {
+      console.error('Claude analyze-move failed:', claudeErr.message);
+      message = fallbackMessage;
+    }
     const isCritical = /mistake|error|blunder|should have|better move|miss/i.test(message);
     return { statusCode: 200, headers, body: JSON.stringify({ message, isCritical, moveNumber }) };
   } catch(e) {

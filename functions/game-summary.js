@@ -1,6 +1,7 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const { keywordToCategory } = require('./_errorCategories');
 const { formatTopMovesForPrompt } = require('./_prompts');
+const { callClaude } = require('./_claude');
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
@@ -171,19 +172,13 @@ exports.handler = async (event) => {
     // A fixed 6s was too short — Claude typically needs 5–12s for a 500-token JSON response.
     const elapsed = Date.now() - startTime;
     const claudeMs = Math.max(4000, 22000 - elapsed);
-    const claudeTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Claude API timeout')), claudeMs)
-    );
-    const claudeFetch = fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+
+    let summary;
+    try {
+      const raw = await callClaude({
         model: CLAUDE_MODEL,
-        max_tokens: 500,
+        maxTokens: 500,
+        timeoutMs: claudeMs,
         system: `You are a Go tutor explaining KataGo's analysis to a student ranked ${rank}.
 GROUNDING RULES:
 - Reference ONLY moves and evaluations present in the KataGo data provided below.
@@ -211,17 +206,7 @@ If none of these match, use the closest one.`,
           role: 'user',
           content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.\n\n${winrateSummaryStr}\n\n${momentPromptParts}`,
         }],
-      }),
-    }).then(async res => {
-      const data = await res.json();
-      if (!res.ok) throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
-      return data;
-    });
-
-    let summary;
-    try {
-      const data = await Promise.race([claudeFetch, claudeTimeout]);
-      const raw   = data.content[0].text;
+      });
       const match = raw.match(/\{[\s\S]*\}/);
       if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
       summary = JSON.parse(match[0]);

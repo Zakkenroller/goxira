@@ -5,6 +5,7 @@ const {
   tacticalFactsString, computePremoveContext, inferProblemRole,
 } = require('./_go-rules');
 const { formatTopMovesForPrompt } = require('./_prompts');
+const { callClaude } = require('./_claude');
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
@@ -189,16 +190,11 @@ The "Verified tactical facts" section is computed by a deterministic rules engin
 ${problemTypeSection}`;
     }
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    let message;
+    try {
+      message = await callClaude({
         model: CLAUDE_MODEL,
-        max_tokens: 200,
+        maxTokens: 200,
         system: `${systemPreamble}
 
 TEACHING CALIBRATION:
@@ -222,11 +218,15 @@ ${premoveContext ? `\n${premoveContext}\n` : ''}
 ${studentFactsStr}
 ${isCorrect ? '' : correctFactsStr}${katagoContext}`,
         }],
-      }),
-    });
-
-    const data    = await res.json();
-    const message = data.content[0].text;
+      });
+    } catch (claudeErr) {
+      // Claude unavailable — fall back to the deterministic facts we already
+      // computed, with an explicit disclaimer. Never a 500 for the student.
+      console.error('Claude evaluate-move failed:', claudeErr.message);
+      message = isCorrect
+        ? `Correct — ${studentMove} is the right move. ${studentFactsStr} (Detailed commentary is temporarily unavailable.)`
+        : `${studentMove} is not the solution here. ${studentFactsStr} (Detailed commentary is temporarily unavailable — try the move again or check the explanation once you solve it.)`;
+    }
 
     return {
       statusCode: 200,

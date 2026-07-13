@@ -1,6 +1,7 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const { keywordToCategory } = require('./_errorCategories');
 const { formatTopMovesForPrompt } = require('./_prompts');
+const { callClaude } = require('./_claude');
 
 // Bump when commentary logic changes significantly.
 // Any cached summary with a lower version is treated as stale and regenerated.
@@ -60,19 +61,12 @@ exports.handler = async (event) => {
 
     // Claude has the full function budget here — no preceding KataGo cost.
     // 20s timeout leaves 6s buffer within Netlify's 26s limit.
-    const claudeTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Claude API timeout')), 20000)
-    );
-    const claudeFetch = fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    let summary;
+    try {
+      const raw = await callClaude({
         model: CLAUDE_MODEL,
-        max_tokens: 500,
+        maxTokens: 500,
+        timeoutMs: 20000,
         system: `You are a Go sensei delivering post-game feedback to a student ranked ${rank}. Your job is to identify what actually happened in the game and why it mattered — grounded in the KataGo data below.
 GROUNDING RULES:
 - Reference ONLY moves and evaluations present in the KataGo data provided below.
@@ -105,17 +99,7 @@ If none of these match, use the closest one.`,
           role: 'user',
           content: `Student rank: ${rank}. Playing as ${playerColor} on ${boardSize}x${boardSize}.\n\n${winrateSummaryStr}\n\n${momentPromptParts}`,
         }],
-      }),
-    }).then(async res => {
-      const data = await res.json();
-      if (!res.ok) throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
-      return data;
-    });
-
-    let summary;
-    try {
-      const data = await Promise.race([claudeFetch, claudeTimeout]);
-      const raw   = data.content[0].text;
+      });
       const match = raw.match(/\{[\s\S]*\}/);
       if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
       summary = JSON.parse(match[0]);

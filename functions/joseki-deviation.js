@@ -14,6 +14,9 @@
 //   - Claude never generates move coordinates or evaluates positions independently.
 
 const CLAUDE_MODEL       = 'claude-haiku-4-5-20251001';
+
+const { callClaude } = require('./_claude');
+
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
@@ -131,16 +134,11 @@ In general, deviating from joseki risks one or more of: poor shape (e.g., empty 
       : `KataGo best move winrate: ${Math.round(bestWinrate * 100)}% for ${colorWord}.`;
 
     // ── Claude explanation ────────────────────────────────────────────
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:  'POST',
-      headers: {
-        'Content-Type':       'application/json',
-        'x-api-key':          process.env.ANTHROPIC_API_KEY,
-        'anthropic-version':  '2023-06-01',
-      },
-      body: JSON.stringify({
-        model:      CLAUDE_MODEL,
-        max_tokens: 200,
+    let explanation;
+    try {
+      explanation = await callClaude({
+        model:     CLAUDE_MODEL,
+        maxTokens: 200,
         system: `You are a Go teacher explaining a joseki deviation to a student ranked ${rank}.
 KataGo has evaluated the position and provided the data below. Your job is to explain WHY the deviation is suboptimal using structural Go concepts.
 
@@ -165,12 +163,12 @@ ${topMovesStr}
 
 Explain why this deviation is suboptimal, grounded only in the KataGo data above.`,
         }],
-      }),
-    });
-
-    if (!res.ok) throw new Error(`Claude API error ${res.status}`);
-    const data        = await res.json();
-    const explanation = data.content[0].text;
+      });
+    } catch (claudeErr) {
+      // Claude unavailable — return KataGo's numbers without the narrative.
+      console.error('Claude joseki-deviation failed:', claudeErr.message);
+      explanation = `${deviationRankStr} ${pointLossStr} (A detailed explanation is temporarily unavailable.)`;
+    }
 
     return {
       statusCode: 200,

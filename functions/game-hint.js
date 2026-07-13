@@ -1,5 +1,7 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
+const { callClaude } = require('./_claude');
+
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
@@ -90,16 +92,11 @@ exports.handler = async (event) => {
       topMovesContext = `\nKataGo's top candidate moves are concentrated in the ${uniqueAreas.slice(0, 2).join(' and ')} of the board.`;
     }
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    let commentary;
+    try {
+      commentary = await callClaude({
         model: CLAUDE_MODEL,
-        max_tokens: 200,
+        maxTokens: 200,
         system: `You are a Go sensei giving a nudge — point the student toward the right area without revealing the answer.${atariContext}
 GROUNDING RULES:
 - Do NOT use filler openers ("Great question!", "Think carefully!", "You're close!"). Start with the directional observation.
@@ -119,11 +116,14 @@ Under 80 words. Conversational. No markdown.`,
           role: 'user',
           content: `Student plays ${playerColor} at ${rank} level. Move ${moveNumber} on ${boardSize}x${boardSize} board.\n${katagoSummary}${topMovesContext}\nGive directional coaching that guides the student toward the important area without naming the exact move.`,
         }],
-      }),
-    });
+      });
+    } catch (claudeErr) {
+      // Claude unavailable — return the KataGo numbers we do have, honestly.
+      console.error('Claude game-hint failed:', claudeErr.message);
+      commentary = `${katagoSummary}${topMovesContext} (Coaching commentary is temporarily unavailable.)`;
+    }
 
-    const data = await res.json();
-    return { statusCode: 200, headers, body: JSON.stringify({ commentary: data.content[0].text }) };
+    return { statusCode: 200, headers, body: JSON.stringify({ commentary }) };
   } catch(e) {
     console.error('game-hint error:', e);
     return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };

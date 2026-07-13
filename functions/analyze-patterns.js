@@ -27,6 +27,7 @@ const CLAUDE_MODEL  = 'claude-sonnet-4-6';
 const MIN_GAMES     = 5;
 
 const { visibleCategories, categoryMeta } = require('./_errorCategories');
+const { callClaude } = require('./_claude');
 
 exports.handler = async (event) => {
   const headers = {
@@ -97,16 +98,11 @@ exports.handler = async (event) => {
       .map(([cat, count]) => `  ${categoryMeta(cat).label}: ${count} occurrence${count !== 1 ? 's' : ''} across ${analyzed.length} games`)
       .join('\n');
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    let result;
+    try {
+      const raw = await callClaude({
         model: CLAUDE_MODEL,
-        max_tokens: 600,
+        maxTokens: 600,
         system: `You are a Go tutor analyzing a student's error patterns across multiple games.
 You receive ONLY aggregated frequency counts — not raw game data. Work strictly from the numbers provided.
 
@@ -138,18 +134,19 @@ Games analyzed: ${analyzed.length}.
 Error frequencies (rank-appropriate categories only):
 ${freqTable}`,
         }],
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(`Claude API error ${res.status}: ${data.error?.message || JSON.stringify(data)}`);
+      });
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
+      result = JSON.parse(match[0]);
+    } catch (claudeErr) {
+      // Claude unavailable — the frequency data is saved; interpretation can wait.
+      console.error('Claude analyze-patterns failed:', claudeErr.message);
+      result = {
+        topWeakAreas: [],
+        studyPriorities: [],
+        progressNotes: 'Pattern analysis is temporarily unavailable — your game data is saved, try again shortly.',
+      };
     }
-
-    const raw   = data.content[0].text;
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error(`Claude returned non-JSON: ${raw.slice(0, 200)}`);
-    const result = JSON.parse(match[0]);
 
     return {
       statusCode: 200,

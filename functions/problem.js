@@ -4,6 +4,7 @@ const {
   toGoNotation, analyzeMove, tacticalFactsString,
   computePremoveContext, inferProblemRole,
 } = require('./_go-rules');
+const { callClaude } = require('./_claude');
 
 function rankToDifficulty(rank) {
   if (!rank) return 1;
@@ -160,17 +161,10 @@ async function enrichWithText(problem, rank) {
     : `PROBLEM TYPE: ${problemCategory.toUpperCase()}`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 250,
-        system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond with a single valid JSON object and nothing else. Do not use markdown code fences. Use this exact shape:
+    const text = await callClaude({
+      model: CLAUDE_MODEL,
+      maxTokens: 250,
+      system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond with a single valid JSON object and nothing else. Do not use markdown code fences. Use this exact shape:
 {"description":"one sentence describing the task for ${toPlayWord} to play","hint":"Socratic hint pointing to the key tactical idea without revealing the answer coordinate","explanation":"one or two sentences explaining why ${solutionNote} is correct — use ONLY the verified board facts provided, do not add or invent anything"}
 
 ACCURACY CONTRACT:
@@ -181,16 +175,13 @@ Verified board facts are computed by a deterministic rules engine. They are grou
 - Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.
 
 ${categoryInstruction}`,
-        messages: [{
-          role: 'user',
-          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
-        }],
-      }),
+      messages: [{
+        role: 'user',
+        content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
+      }],
     });
 
-    if (!res.ok) throw new Error(`Claude API error ${res.status}`);
-    const data = await res.json();
-    const raw = data.content[0].text.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
+    const raw = text.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
     return JSON.parse(raw);
   } catch (e) {
     // Safe fallback: use the raw facts directly, no LLM required
