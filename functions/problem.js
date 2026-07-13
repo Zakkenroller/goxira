@@ -1,5 +1,9 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
-const GOCOLS = 'ABCDEFGHJKLMNOPQRST';
+
+const {
+  toGoNotation, analyzeMove, tacticalFactsString,
+  computePremoveContext, inferProblemRole,
+} = require('./_go-rules');
 
 function rankToDifficulty(rank) {
   if (!rank) return 1;
@@ -11,10 +15,6 @@ function rankToDifficulty(rank) {
   if (kyu >= 20) return 1;
   if (kyu >= 10) return 2;
   return 3;
-}
-
-function toGoNotation(col, row, boardSize) {
-  return GOCOLS[col] + (boardSize - row);
 }
 
 // Deterministic board region from internal coordinates.
@@ -126,161 +126,6 @@ async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
   return rows[0];
 }
 
-// ── Local Go rules engine ─────────────────────────────────────────────────
-// Gives Claude verified ground truth so explanations are factually correct.
-
-function getGroup(stones, col, row) {
-  const color = stones[`${col},${row}`];
-  if (!color) return null;
-  const visited = new Set();
-  const queue = [[col, row]];
-  while (queue.length) {
-    const [c, r] = queue.pop();
-    const key = `${c},${r}`;
-    if (visited.has(key)) continue;
-    if (stones[key] !== color) continue;
-    visited.add(key);
-    queue.push([c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]);
-  }
-  return visited;
-}
-
-function getLiberties(stones, group, boardSize) {
-  const liberties = new Set();
-  for (const key of group) {
-    const [c, r] = key.split(',').map(Number);
-    for (const [nc, nr] of [[c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]]) {
-      if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
-      if (!stones[`${nc},${nr}`]) liberties.add(`${nc},${nr}`);
-    }
-  }
-  return liberties;
-}
-
-// Returns { captured: [{count, notations}], atari: [{count, liberty}] }
-function analyzeMove(initialStones, col, row, color, boardSize) {
-  const stones = Object.assign({}, initialStones);
-  const opponent = color === 'B' ? 'W' : 'B';
-  stones[`${col},${row}`] = color;
-
-  const captured = [];
-  const visitedCapture = new Set();
-
-  for (const [nc, nr] of [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]]) {
-    if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
-    const nkey = `${nc},${nr}`;
-    if (stones[nkey] !== opponent || visitedCapture.has(nkey)) continue;
-    const group = getGroup(stones, nc, nr);
-    for (const k of group) visitedCapture.add(k);
-    if (getLiberties(stones, group, boardSize).size === 0) {
-      const notations = [...group].map(k => {
-        const [gc, gr] = k.split(',').map(Number);
-        return toGoNotation(gc, gr, boardSize);
-      }).sort();
-      captured.push({ count: group.size, notations });
-      for (const k of group) delete stones[k];
-    }
-  }
-
-  const atari = [];
-  const visitedAtari = new Set();
-  for (const [nc, nr] of [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]]) {
-    if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
-    const nkey = `${nc},${nr}`;
-    if (stones[nkey] !== opponent || visitedAtari.has(nkey)) continue;
-    const group = getGroup(stones, nc, nr);
-    for (const k of group) visitedAtari.add(k);
-    const libs = getLiberties(stones, group, boardSize);
-    if (libs.size === 1) {
-      const [lc, lr] = [...libs][0].split(',').map(Number);
-      atari.push({ count: group.size, liberty: toGoNotation(lc, lr, boardSize) });
-    }
-  }
-
-  return { captured, atari };
-}
-
-function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
-  const parts = [];
-  for (const g of result.captured) {
-    parts.push(
-      `${toPlayWord} captures ${g.count} ${opponentWord} stone${g.count > 1 ? 's' : ''} (at ${g.notations.join(', ')})`
-    );
-  }
-  for (const g of result.atari) {
-    parts.push(
-      `puts ${g.count} ${opponentWord} stone${g.count > 1 ? 's' : ''} in atari — 1 liberty remaining at ${g.liberty}`
-    );
-  }
-  if (!parts.length) parts.push('no immediate captures or atari (indirect threat or setup move)');
-  return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
-}
-
-// ── Pre-move full-board liberty analysis ──────────────────────────────────
-// Computes liberty counts for all groups on the board BEFORE the move is played.
-// Filters to contested groups (≤ 6 liberties) to give Claude grounded context
-// for distinguishing attack from defense problems.
-
-function computePremoveContext(stones, toPlay, boardSize) {
-  const toPlayWord   = toPlay === 'B' ? 'Black' : 'White';
-  const opponentWord = toPlay === 'B' ? 'White' : 'Black';
-  const visited = new Set();
-  const contested = [];
-
-  for (const key of Object.keys(stones)) {
-    if (visited.has(key)) continue;
-    const [c, r] = key.split(',').map(Number);
-    const group = getGroup(stones, c, r);
-    for (const k of group) visited.add(k);
-    const libs = getLiberties(stones, group, boardSize);
-    if (libs.size > 6) continue;
-    const color = stones[key];
-    const colorWord = color === toPlay ? toPlayWord : opponentWord;
-    const stoneCoords = [...group].map(k => {
-      const [gc, gr] = k.split(',').map(Number);
-      return toGoNotation(gc, gr, boardSize);
-    }).sort().join(', ');
-    const libCoords = [...libs].map(k => {
-      const [lc, lr] = k.split(',').map(Number);
-      return toGoNotation(lc, lr, boardSize);
-    }).sort().join(', ');
-    contested.push(
-      `${colorWord} group [${stoneCoords}]: ${libs.size} libert${libs.size === 1 ? 'y' : 'ies'} (${libCoords})`
-    );
-  }
-
-  return contested.length
-    ? `Pre-move contested groups:\n${contested.join('\n')}`
-    : '';
-}
-
-// Returns 'attack' if the solution fills a liberty of a low-liberty opponent group,
-// 'defense' if adjacent to a low-liberty to-play group, or 'unknown'.
-function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
-  const opponent = toPlay === 'B' ? 'W' : 'B';
-  const solutionKey = `${solutionCol},${solutionRow}`;
-  const visited = new Set();
-
-  for (const [key, color] of Object.entries(stones)) {
-    if (visited.has(key)) continue;
-    const [c, r] = key.split(',').map(Number);
-    const group = getGroup(stones, c, r);
-    for (const k of group) visited.add(k);
-    const libs = getLiberties(stones, group, boardSize);
-    if (libs.size > 6) continue; // match computePremoveContext threshold
-
-    if (color === opponent && libs.has(solutionKey)) return 'attack';
-    if (color === toPlay) {
-      const adj = [
-        [solutionCol - 1, solutionRow], [solutionCol + 1, solutionRow],
-        [solutionCol, solutionRow - 1], [solutionCol, solutionRow + 1],
-      ];
-      if (adj.some(([ac, ar]) => group.has(`${ac},${ar}`))) return 'defense';
-    }
-  }
-  return 'unknown';
-}
-
 async function enrichWithText(problem, rank) {
   const { board_size, to_play, stones, solution_col, solution_row, category } = problem;
 
@@ -291,7 +136,7 @@ async function enrichWithText(problem, rank) {
 
   // Compute verified tactical facts for the solution move
   const facts      = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
-  const factsStr   = tacticalFactsString(facts, solutionNote, toPlayWord, opponentWord);
+  const factsStr   = tacticalFactsString(facts, solutionNote, toPlayWord, opponentWord, { indirectNote: true });
 
   // Pre-move liberty analysis: determines whether this is an attack or defense problem
   const premoveContext = computePremoveContext(stones, to_play, board_size);

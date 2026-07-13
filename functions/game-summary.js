@@ -1,5 +1,6 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const { keywordToCategory } = require('./_errorCategories');
+const { formatTopMovesForPrompt } = require('./_prompts');
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
@@ -96,16 +97,6 @@ function truncateSGF(sgf, moveCount) {
   const header = sgf.slice(0, sgf.indexOf(';') + 1).replace(/;[BW].*/, '');
   const body = sgf.slice(sgf.indexOf(';'), lastIndex + 1);
   return '(' + body + ')';
-}
-
-function formatTopMovesForPrompt(topMoves, toPlayWord) {
-  if (!topMoves?.length) return '';
-  return topMoves.slice(0, 5).map((m, i) => {
-    const winPct = Math.round((m.winrate ?? 0) * 100);
-    const score = m.scoreLead != null ? `, score ${m.scoreLead > 0 ? '+' : ''}${m.scoreLead.toFixed(1)}` : '';
-    const pv = m.pv?.length ? ` → sequence: ${m.pv.join(', ')}` : '';
-    return `  ${i + 1}. ${m.move}: ${winPct}% for ${toPlayWord}${score}${pv}`;
-  }).join('\n');
 }
 
 exports.handler = async (event) => {
