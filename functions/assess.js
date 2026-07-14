@@ -1,12 +1,14 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
+const { callClaude } = require('./_claude');
+const { corsHeaders, requireUser } = require('./_auth');
+
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { messages, userContext } = JSON.parse(event.body);
@@ -46,23 +48,26 @@ rankScore must be the midpoint of the bucket:
       ? [{ role: 'user', content: contextMsg + 'Please start the assessment.' }]
       : messages;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    let text;
+    try {
+      text = await callClaude({
         model: CLAUDE_MODEL,
-        max_tokens: 600,
+        maxTokens: 600,
         system,
         messages: allMessages,
-      }),
-    });
-
-    const data = await res.json();
-    const text = data.content[0].text;
+      });
+    } catch (claudeErr) {
+      // Don't crash onboarding — let the student retry their last answer.
+      console.error('Claude assess failed:', claudeErr.message);
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          type: 'question',
+          message: 'Sorry, I had trouble connecting just now. Please send your last answer again.',
+        }),
+      };
+    }
 
     if (text.includes('ASSESSMENT_COMPLETE')) {
       const jsonMatch = text.match(/\{[\s\S]*\}/);

@@ -95,8 +95,33 @@ No known remaining issues. All touch interaction issues have been resolved:
 - ~~No placement confirmation~~ — Fixed: a pending stone with an animated progress ring appears immediately on finger-lift, followed by a "judging" indicator while the API evaluates.
 - ~~Off-screen placement not blocked~~ — Fixed: placement is rejected if the touch point is outside the viewport.
 
-### supabase-schema.sql Is Incomplete
-The `tsumego_problems` table (the problem library) was added directly in Supabase and is not reflected in the committed schema file. If someone self-hosts using only the schema file, they won't have the problems table. The schema file should be updated to include the table definition and, ideally, instructions for loading the problem data.
+### Schema file
+`supabase-schema.sql` includes all tables (including `tsumego_problems` with
+seeding instructions, and `problem_enrichments`). When adding a table in the
+Supabase dashboard, mirror it in the schema file so self-hosters stay whole.
+
+## Server-Side Infrastructure Notes
+
+- **Shared function modules** (`functions/_*.js`): `_go-rules.js` (deterministic
+  rules engine — the ground truth Claude prompts are built on), `_claude.js`
+  (the only place the Anthropic API is called; always catch `ClaudeApiError`
+  and degrade honestly), `_auth.js` (Supabase JWT validation + CORS),
+  `_prompts.js`, `_errorCategories.js`.
+- **Auth on AI endpoints**: every money-spending function requires a Supabase
+  session token once `REQUIRE_AUTH=true` is set in Netlify env. `api.js`
+  attaches the token automatically. Enforcement is a deliberate two-step
+  rollout: deploy first (no-op), then flip the env var.
+- **Enrichment cache**: `problem.js` serves tsumego teaching text from the
+  `problem_enrichments` table (keyed problem x rank band x `ENRICH_VERSION`).
+  Writes require `SUPABASE_SERVICE_ROLE_KEY` in Netlify env; without it the
+  cache is read-only/disabled and every serve calls Claude as before. Bump
+  `ENRICH_VERSION` when the enrichment prompt changes.
+- **Env vars** (Netlify): `ANTHROPIC_API_KEY`, `SUPABASE_URL`,
+  `SUPABASE_ANON_KEY`, `KATAGO_SERVICE_URL`, `KATAGO_TOKEN` (existing);
+  `REQUIRE_AUTH`, `SITE_ORIGIN`, `SUPABASE_SERVICE_ROLE_KEY` (added 2026-07,
+  all optional — absent means prior behavior).
+- `repo-export.txt` is generated at build time (`netlify.toml` build command)
+  and is no longer committed.
 
 ## Requirements Document
 

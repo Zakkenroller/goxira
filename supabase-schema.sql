@@ -167,6 +167,34 @@ create policy "Problems: read for authenticated" on public.tsumego_problems
 -- games_calibrated: count of completed 9x9 standard-Go games used for winrate-swing calibration.
 --   Incremented by rank-calibrate.js. When it reaches 5, rank_confidence flips to 'high'.
 
+-- ── Problem Enrichment Cache ──────────────────────────────────────────────
+-- Claude-generated teaching text (description/hint/explanation) per problem
+-- and rank band. Written once per (problem, band) by problem.js via the
+-- service role, then served from cache — this removes the per-serve Claude
+-- call, which is the single largest recurring API cost.
+--
+-- rank_band matches rankToDifficulty() in functions/problem.js:
+--   1 = 30-20 kyu, 2 = 19-10 kyu, 3 = 9 kyu and stronger (incl. dan)
+-- version matches ENRICH_VERSION in functions/problem.js; bumping it there
+-- invalidates the cache (rows are overwritten on the next serve).
+create table public.problem_enrichments (
+  problem_id  uuid not null references public.tsumego_problems(id) on delete cascade,
+  rank_band   integer not null check (rank_band in (1, 2, 3)),
+  version     integer not null,
+  description text not null,
+  hint        text not null,
+  explanation text not null,
+  created_at  timestamptz not null default now(),
+  primary key (problem_id, rank_band)
+);
+
+alter table public.problem_enrichments enable row level security;
+
+-- Public read (teaching text is not sensitive); writes only via the service
+-- role key (no insert/update policy), so users cannot poison the cache.
+create policy "Enrichments: public read" on public.problem_enrichments
+  for select using (true);
+
 -- ── Spaced Repetition Schedule ────────────────────────────────────────────
 -- One row per (user, problem). Tracks SM-2 state for adaptive review scheduling.
 -- When a problem is first attempted, a row is inserted here.

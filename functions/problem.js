@@ -1,5 +1,21 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
-const GOCOLS = 'ABCDEFGHJKLMNOPQRST';
+
+const {
+  toGoNotation, analyzeMove, tacticalFactsString,
+  computePremoveContext, inferProblemRole,
+} = require('./_go-rules');
+const { callClaude } = require('./_claude');
+
+// Bump to invalidate cached enrichments when the enrichment prompt changes
+// (matches the SUMMARY_VERSION pattern in game-comment.js).
+const ENRICH_VERSION = 1;
+
+// Representative rank per difficulty band — cached teaching text is shared by
+// everyone in the band, so the prompt gets the band midpoint, not the exact rank.
+function bandRankLabel(band) {
+  return band === 3 ? '5 kyu' : band === 2 ? '15 kyu' : '25 kyu';
+}
+const { corsHeaders, requireUser } = require('./_auth');
 
 function rankToDifficulty(rank) {
   if (!rank) return 1;
@@ -11,10 +27,6 @@ function rankToDifficulty(rank) {
   if (kyu >= 20) return 1;
   if (kyu >= 10) return 2;
   return 3;
-}
-
-function toGoNotation(col, row, boardSize) {
-  return GOCOLS[col] + (boardSize - row);
 }
 
 // Deterministic board region from internal coordinates.
@@ -61,7 +73,6 @@ async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
 
         if (uuids.length) {
           // Fetch the actual problems for these IDs and filter by difficulty + category
-          const inFilter = uuids.map(id => `"${id}"`).join(',');
           const pUrl = new URL(`${base}/rest/v1/tsumego_problems`);
           pUrl.searchParams.set('id',        `in.(${uuids.join(',')})`);
           pUrl.searchParams.set('difficulty', `eq.${difficulty}`);
@@ -126,159 +137,81 @@ async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
   return rows[0];
 }
 
-// ── Local Go rules engine ─────────────────────────────────────────────────
-// Gives Claude verified ground truth so explanations are factually correct.
+// ── Enrichment cache (problem_enrichments table) ──────────────────────────
+// Claude teaching text is deterministic per (problem, rank band, version), so
+// it is generated once and cached in Supabase. A missing table or missing
+// service-role key degrades to the pre-cache behavior: one Claude call per serve.
 
-function getGroup(stones, col, row) {
-  const color = stones[`${col},${row}`];
-  if (!color) return null;
-  const visited = new Set();
-  const queue = [[col, row]];
-  while (queue.length) {
-    const [c, r] = queue.pop();
-    const key = `${c},${r}`;
-    if (visited.has(key)) continue;
-    if (stones[key] !== color) continue;
-    visited.add(key);
-    queue.push([c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]);
+async function fetchCachedEnrichment(problemId, band) {
+  try {
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/problem_enrichments`);
+    url.searchParams.set('problem_id', `eq.${problemId}`);
+    url.searchParams.set('rank_band',  `eq.${band}`);
+    url.searchParams.set('version',    `eq.${ENRICH_VERSION}`);
+    url.searchParams.set('select',     'description,hint,explanation');
+    url.searchParams.set('limit',      '1');
+    const res = await fetch(url.toString(), {
+      headers: {
+        'apikey': process.env.SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (!res.ok) return null; // table missing or transient error — regenerate
+    const rows = await res.json();
+    return rows.length ? rows[0] : null;
+  } catch (e) {
+    console.warn('Enrichment cache read failed:', e.message);
+    return null;
   }
-  return visited;
 }
 
-function getLiberties(stones, group, boardSize) {
-  const liberties = new Set();
-  for (const key of group) {
-    const [c, r] = key.split(',').map(Number);
-    for (const [nc, nr] of [[c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]]) {
-      if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
-      if (!stones[`${nc},${nr}`]) liberties.add(`${nc},${nr}`);
-    }
+// Best-effort upsert; requires SUPABASE_SERVICE_ROLE_KEY (the table has no
+// insert policy, so users cannot poison the cache with the anon key).
+async function storeEnrichment(problemId, band, text) {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) return; // caching disabled — no env var, no writes
+  try {
+    const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/problem_enrichments`, {
+      method: 'POST',
+      headers: {
+        'apikey': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        problem_id:  problemId,
+        rank_band:   band,
+        version:     ENRICH_VERSION,
+        description: text.description,
+        hint:        text.hint,
+        explanation: text.explanation,
+      }),
+    });
+    if (!res.ok) console.warn('Enrichment cache write failed:', res.status);
+  } catch (e) {
+    console.warn('Enrichment cache write failed:', e.message);
   }
-  return liberties;
 }
 
-// Returns { captured: [{count, notations}], atari: [{count, liberty}] }
-function analyzeMove(initialStones, col, row, color, boardSize) {
-  const stones = Object.assign({}, initialStones);
-  const opponent = color === 'B' ? 'W' : 'B';
-  stones[`${col},${row}`] = color;
-
-  const captured = [];
-  const visitedCapture = new Set();
-
-  for (const [nc, nr] of [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]]) {
-    if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
-    const nkey = `${nc},${nr}`;
-    if (stones[nkey] !== opponent || visitedCapture.has(nkey)) continue;
-    const group = getGroup(stones, nc, nr);
-    for (const k of group) visitedCapture.add(k);
-    if (getLiberties(stones, group, boardSize).size === 0) {
-      const notations = [...group].map(k => {
-        const [gc, gr] = k.split(',').map(Number);
-        return toGoNotation(gc, gr, boardSize);
-      }).sort();
-      captured.push({ count: group.size, notations });
-      for (const k of group) delete stones[k];
-    }
-  }
-
-  const atari = [];
-  const visitedAtari = new Set();
-  for (const [nc, nr] of [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]]) {
-    if (nc < 0 || nc >= boardSize || nr < 0 || nr >= boardSize) continue;
-    const nkey = `${nc},${nr}`;
-    if (stones[nkey] !== opponent || visitedAtari.has(nkey)) continue;
-    const group = getGroup(stones, nc, nr);
-    for (const k of group) visitedAtari.add(k);
-    const libs = getLiberties(stones, group, boardSize);
-    if (libs.size === 1) {
-      const [lc, lr] = [...libs][0].split(',').map(Number);
-      atari.push({ count: group.size, liberty: toGoNotation(lc, lr, boardSize) });
-    }
-  }
-
-  return { captured, atari };
-}
-
-function tacticalFactsString(result, moveNotation, toPlayWord, opponentWord) {
-  const parts = [];
-  for (const g of result.captured) {
-    parts.push(
-      `${toPlayWord} captures ${g.count} ${opponentWord} stone${g.count > 1 ? 's' : ''} (at ${g.notations.join(', ')})`
-    );
-  }
-  for (const g of result.atari) {
-    parts.push(
-      `puts ${g.count} ${opponentWord} stone${g.count > 1 ? 's' : ''} in atari — 1 liberty remaining at ${g.liberty}`
-    );
-  }
-  if (!parts.length) parts.push('no immediate captures or atari (indirect threat or setup move)');
-  return `Verified board facts after ${moveNotation}: ${parts.join('; ')}.`;
-}
-
-// ── Pre-move full-board liberty analysis ──────────────────────────────────
-// Computes liberty counts for all groups on the board BEFORE the move is played.
-// Filters to contested groups (≤ 6 liberties) to give Claude grounded context
-// for distinguishing attack from defense problems.
-
-function computePremoveContext(stones, toPlay, boardSize) {
-  const toPlayWord   = toPlay === 'B' ? 'Black' : 'White';
-  const opponentWord = toPlay === 'B' ? 'White' : 'Black';
-  const visited = new Set();
-  const contested = [];
-
-  for (const key of Object.keys(stones)) {
-    if (visited.has(key)) continue;
-    const [c, r] = key.split(',').map(Number);
-    const group = getGroup(stones, c, r);
-    for (const k of group) visited.add(k);
-    const libs = getLiberties(stones, group, boardSize);
-    if (libs.size > 6) continue;
-    const color = stones[key];
-    const colorWord = color === toPlay ? toPlayWord : opponentWord;
-    const stoneCoords = [...group].map(k => {
-      const [gc, gr] = k.split(',').map(Number);
-      return toGoNotation(gc, gr, boardSize);
-    }).sort().join(', ');
-    const libCoords = [...libs].map(k => {
-      const [lc, lr] = k.split(',').map(Number);
-      return toGoNotation(lc, lr, boardSize);
-    }).sort().join(', ');
-    contested.push(
-      `${colorWord} group [${stoneCoords}]: ${libs.size} libert${libs.size === 1 ? 'y' : 'ies'} (${libCoords})`
-    );
-  }
-
-  return contested.length
-    ? `Pre-move contested groups:\n${contested.join('\n')}`
-    : '';
-}
-
-// Returns 'attack' if the solution fills a liberty of a low-liberty opponent group,
-// 'defense' if adjacent to a low-liberty to-play group, or 'unknown'.
-function inferProblemRole(stones, toPlay, solutionCol, solutionRow, boardSize) {
-  const opponent = toPlay === 'B' ? 'W' : 'B';
-  const solutionKey = `${solutionCol},${solutionRow}`;
-  const visited = new Set();
-
-  for (const [key, color] of Object.entries(stones)) {
-    if (visited.has(key)) continue;
-    const [c, r] = key.split(',').map(Number);
-    const group = getGroup(stones, c, r);
-    for (const k of group) visited.add(k);
-    const libs = getLiberties(stones, group, boardSize);
-    if (libs.size > 6) continue; // match computePremoveContext threshold
-
-    if (color === opponent && libs.has(solutionKey)) return 'attack';
-    if (color === toPlay) {
-      const adj = [
-        [solutionCol - 1, solutionRow], [solutionCol + 1, solutionRow],
-        [solutionCol, solutionRow - 1], [solutionCol, solutionRow + 1],
-      ];
-      if (adj.some(([ac, ar]) => group.has(`${ac},${ar}`))) return 'defense';
-    }
-  }
-  return 'unknown';
+// Deterministic teaching text from the rules engine alone — used when Claude
+// is unavailable. Never cached: it is degraded content.
+function fallbackEnrichment(problem) {
+  const { board_size, to_play, stones, solution_col, solution_row } = problem;
+  const toPlayWord   = to_play === 'B' ? 'Black' : 'White';
+  const opponentWord = to_play === 'B' ? 'White' : 'Black';
+  const solutionNote = toGoNotation(solution_col, solution_row, board_size);
+  const facts = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
+  const explanation = facts.captured.length
+    ? `Playing at ${solutionNote} captures ${facts.captured[0].count} ${opponentWord} stone${facts.captured[0].count > 1 ? 's' : ''}.`
+    : facts.atari.length
+    ? `Playing at ${solutionNote} puts ${facts.atari[0].count} ${opponentWord} stone${facts.atari[0].count > 1 ? 's' : ''} in atari.`
+    : `Playing at ${solutionNote} is the key forcing move.`;
+  return {
+    description: `${toPlayWord} to play — find the key move.`,
+    hint:        'Look for the vital point of the position.',
+    explanation,
+  };
 }
 
 async function enrichWithText(problem, rank) {
@@ -291,7 +224,7 @@ async function enrichWithText(problem, rank) {
 
   // Compute verified tactical facts for the solution move
   const facts      = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
-  const factsStr   = tacticalFactsString(facts, solutionNote, toPlayWord, opponentWord);
+  const factsStr   = tacticalFactsString(facts, solutionNote, toPlayWord, opponentWord, { indirectNote: true });
 
   // Pre-move liberty analysis: determines whether this is an attack or defense problem
   const premoveContext = computePremoveContext(stones, to_play, board_size);
@@ -314,18 +247,10 @@ async function enrichWithText(problem, rank) {
     ? `PROBLEM TYPE: TESUJI — The description and hint should name the tesuji technique if it is identifiable from the facts.`
     : `PROBLEM TYPE: ${problemCategory.toUpperCase()}`;
 
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 250,
-        system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond with a single valid JSON object and nothing else. Do not use markdown code fences. Use this exact shape:
+  const text = await callClaude({
+    model: CLAUDE_MODEL,
+    maxTokens: 250,
+    system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond with a single valid JSON object and nothing else. Do not use markdown code fences. Use this exact shape:
 {"description":"one sentence describing the task for ${toPlayWord} to play","hint":"Socratic hint pointing to the key tactical idea without revealing the answer coordinate","explanation":"one or two sentences explaining why ${solutionNote} is correct — use ONLY the verified board facts provided, do not add or invent anything"}
 
 ACCURACY CONTRACT:
@@ -336,47 +261,45 @@ Verified board facts are computed by a deterministic rules engine. They are grou
 - Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.
 
 ${categoryInstruction}`,
-        messages: [{
-          role: 'user',
-          content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
-        }],
-      }),
-    });
+    messages: [{
+      role: 'user',
+      content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
+    }],
+  });
 
-    if (!res.ok) throw new Error(`Claude API error ${res.status}`);
-    const data = await res.json();
-    const raw = data.content[0].text.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
-    return JSON.parse(raw);
-  } catch (e) {
-    // Safe fallback: use the raw facts directly, no LLM required
-    const fallbackExplanation = facts.captured.length
-      ? `Playing at ${solutionNote} captures ${facts.captured[0].count} ${opponentWord} stone${facts.captured[0].count > 1 ? 's' : ''}.`
-      : facts.atari.length
-      ? `Playing at ${solutionNote} puts ${facts.atari[0].count} ${opponentWord} stone${facts.atari[0].count > 1 ? 's' : ''} in atari.`
-      : `Playing at ${solutionNote} is the key forcing move.`;
-    return {
-      description: `${toPlayWord} to play — find the key move.`,
-      hint:        'Look for the vital point of the position.',
-      explanation: fallbackExplanation,
-    };
+  const raw = text.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
+  const parsed = JSON.parse(raw);
+  if (!parsed?.description || !parsed?.hint || !parsed?.explanation) {
+    throw new Error('Enrichment JSON missing required fields');
   }
+  return parsed; // throws propagate to the handler, which falls back and does not cache
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const authHeader = event.headers['authorization'] || event.headers['Authorization'] || '';
     const { rank, category, userId } = JSON.parse(event.body);
     const difficulty = rankToDifficulty(rank);
 
-    const row  = await fetchProblemFromDB(difficulty, category || null, userId || null, authHeader);
-    const text = await enrichWithText(row, rank || '20 kyu');
+    const row = await fetchProblemFromDB(difficulty, category || null, userId || null, authHeader);
+
+    // Serve cached teaching text when available; generate + cache on miss.
+    let text = await fetchCachedEnrichment(row.id, difficulty);
+    if (!text) {
+      try {
+        text = await enrichWithText(row, bandRankLabel(difficulty));
+        await storeEnrichment(row.id, difficulty, text);
+      } catch (e) {
+        console.error('Enrichment generation failed:', e.message);
+        text = fallbackEnrichment(row); // deterministic, never cached
+      }
+    }
 
     const problem = {
       id:          `db_${row.id}`,

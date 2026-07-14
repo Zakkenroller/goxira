@@ -3,9 +3,18 @@ const API = (() => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      // Attach the Supabase session token — the functions require it once
+      // REQUIRE_AUTH is enabled server-side.
+      try {
+        const session = window.Auth ? await Auth.getSession() : null;
+        if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+      } catch (e) {
+        // No session — send unauthenticated and let the server decide.
+      }
       const res = await fetch(`/.netlify/functions/${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       });

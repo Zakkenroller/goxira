@@ -1,3 +1,5 @@
+const { corsHeaders, requireUser } = require('./_auth');
+
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
@@ -84,12 +86,11 @@ function truncateSGF(sgf, moveCount) {
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { sgf, boardSize, rank, playerColor, turns: cachedTurns } = JSON.parse(event.body);
