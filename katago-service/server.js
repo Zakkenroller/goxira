@@ -12,6 +12,10 @@ const KATAGO_CONFIG      = process.env.KATAGO_CONFIG      || '/opt/katago/analys
 const KATAGO_HUMAN_MODEL = process.env.KATAGO_HUMAN_MODEL || ''; // optional; enables humanSL play
 const PORT               = parseInt(process.env.PORT || '3000');
 const AUTH_TOKEN         = process.env.KATAGO_TOKEN;
+// Bind host. Defaults to 127.0.0.1 so the VPS deploy stays reachable only via
+// its local nginx proxy. Container platforms (Cloud Run, Fly) that expose the
+// port directly set BIND_HOST=0.0.0.0 — the Dockerfile does this.
+const BIND_HOST          = process.env.BIND_HOST || '127.0.0.1';
 
 // ---------- KataGo engine ----------
 
@@ -318,6 +322,21 @@ function readBody(req) {
 // ---------- Routes ----------
 
 const server = http.createServer(async (req, res) => {
+  // Health checks are exempt from auth so platform probes (Cloud Run startup/
+  // liveness, load balancers) can reach them without the bearer token. They
+  // expose no sensitive data.
+  // - /health        : liveness — always 200 while the process is up.
+  // - /health/ready  : readiness — 200 only once the KataGo engine has loaded
+  //                    its model, 503 during cold start. Cloud Run's startup
+  //                    probe targets this so the first user request never hits
+  //                    a cold engine.
+  if (req.url === '/health') {
+    return respond(res, 200, { ok: true, ready: engine.ready, humanSL: !!KATAGO_HUMAN_MODEL });
+  }
+  if (req.url === '/health/ready') {
+    return respond(res, engine.ready ? 200 : 503, { ready: engine.ready });
+  }
+
   // Auth
   if (AUTH_TOKEN) {
     const auth = req.headers['authorization'] || '';
@@ -329,11 +348,6 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' });
     return res.end();
-  }
-
-  // Health check (GET or POST)
-  if (req.url === '/health') {
-    return respond(res, 200, { ok: true, ready: engine.ready, humanSL: !!KATAGO_HUMAN_MODEL });
   }
 
   if (req.method !== 'POST') return respond(res, 405, { error: 'method not allowed' });
@@ -515,6 +529,6 @@ const server = http.createServer(async (req, res) => {
   return respond(res, 404, { error: 'not found' });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`katago-service listening on 127.0.0.1:${PORT}`);
+server.listen(PORT, BIND_HOST, () => {
+  console.log(`katago-service listening on ${BIND_HOST}:${PORT}`);
 });

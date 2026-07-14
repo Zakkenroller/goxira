@@ -1,0 +1,47 @@
+# Optional declarative Cloud Run config. Use this instead of plain `gcloud run
+# deploy` when you want a startup probe — Cloud Run then withholds traffic until
+# the KataGo engine has loaded, so no user request ever hits a cold engine
+# (the alternative is one honest-degradation on the first request after idle).
+#
+# Two-step flow (build+push, then apply). Replace PROJECT_ID and REGION:
+#   gcloud builds submit katago-service --tag REGION-docker.pkg.dev/PROJECT_ID/goxira/katago-service
+#   gcloud run services replace katago-service/service.yaml --region REGION
+#   gcloud run services set-iam-policy ... (allow-unauthenticated — see DEPLOY-CLOUDRUN.md)
+#
+# The image ref below must match the --tag you pushed.
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: katago-service
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"   # scale to zero when idle (free); "1" to keep warm
+        autoscaling.knative.dev/maxScale: "2"
+    spec:
+      containerConcurrency: 8
+      timeoutSeconds: 60
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/goxira/katago-service:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KATAGO_TOKEN
+              value: "REPLACE_WITH_TOKEN"   # or wire to Secret Manager (see doc)
+          resources:
+            limits:
+              cpu: "2"        # analysis.cfg is tuned for 2 threads
+              memory: 2Gi
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 30   # allow up to ~150s for first-time engine load
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
