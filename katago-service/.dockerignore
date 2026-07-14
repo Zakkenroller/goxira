@@ -1,0 +1,5 @@
+setup.sh
+DEPLOY-CLOUDRUN.md
+service.yaml
+node_modules
+*.log
