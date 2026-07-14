@@ -73,7 +73,6 @@ async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
 
         if (uuids.length) {
           // Fetch the actual problems for these IDs and filter by difficulty + category
-          const inFilter = uuids.map(id => `"${id}"`).join(',');
           const pUrl = new URL(`${base}/rest/v1/tsumego_problems`);
           pUrl.searchParams.set('id',        `in.(${uuids.join(',')})`);
           pUrl.searchParams.set('difficulty', `eq.${difficulty}`);
