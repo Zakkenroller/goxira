@@ -5,6 +5,16 @@ const {
   computePremoveContext, inferProblemRole,
 } = require('./_go-rules');
 const { callClaude } = require('./_claude');
+
+// Bump to invalidate cached enrichments when the enrichment prompt changes
+// (matches the SUMMARY_VERSION pattern in game-comment.js).
+const ENRICH_VERSION = 1;
+
+// Representative rank per difficulty band — cached teaching text is shared by
+// everyone in the band, so the prompt gets the band midpoint, not the exact rank.
+function bandRankLabel(band) {
+  return band === 3 ? '5 kyu' : band === 2 ? '15 kyu' : '25 kyu';
+}
 const { corsHeaders, requireUser } = require('./_auth');
 
 function rankToDifficulty(rank) {
@@ -128,6 +138,83 @@ async function fetchProblemFromDB(difficulty, category, userId, authHeader) {
   return rows[0];
 }
 
+// ── Enrichment cache (problem_enrichments table) ──────────────────────────
+// Claude teaching text is deterministic per (problem, rank band, version), so
+// it is generated once and cached in Supabase. A missing table or missing
+// service-role key degrades to the pre-cache behavior: one Claude call per serve.
+
+async function fetchCachedEnrichment(problemId, band) {
+  try {
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/problem_enrichments`);
+    url.searchParams.set('problem_id', `eq.${problemId}`);
+    url.searchParams.set('rank_band',  `eq.${band}`);
+    url.searchParams.set('version',    `eq.${ENRICH_VERSION}`);
+    url.searchParams.set('select',     'description,hint,explanation');
+    url.searchParams.set('limit',      '1');
+    const res = await fetch(url.toString(), {
+      headers: {
+        'apikey': process.env.SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (!res.ok) return null; // table missing or transient error — regenerate
+    const rows = await res.json();
+    return rows.length ? rows[0] : null;
+  } catch (e) {
+    console.warn('Enrichment cache read failed:', e.message);
+    return null;
+  }
+}
+
+// Best-effort upsert; requires SUPABASE_SERVICE_ROLE_KEY (the table has no
+// insert policy, so users cannot poison the cache with the anon key).
+async function storeEnrichment(problemId, band, text) {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) return; // caching disabled — no env var, no writes
+  try {
+    const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/problem_enrichments`, {
+      method: 'POST',
+      headers: {
+        'apikey': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        problem_id:  problemId,
+        rank_band:   band,
+        version:     ENRICH_VERSION,
+        description: text.description,
+        hint:        text.hint,
+        explanation: text.explanation,
+      }),
+    });
+    if (!res.ok) console.warn('Enrichment cache write failed:', res.status);
+  } catch (e) {
+    console.warn('Enrichment cache write failed:', e.message);
+  }
+}
+
+// Deterministic teaching text from the rules engine alone — used when Claude
+// is unavailable. Never cached: it is degraded content.
+function fallbackEnrichment(problem) {
+  const { board_size, to_play, stones, solution_col, solution_row } = problem;
+  const toPlayWord   = to_play === 'B' ? 'Black' : 'White';
+  const opponentWord = to_play === 'B' ? 'White' : 'Black';
+  const solutionNote = toGoNotation(solution_col, solution_row, board_size);
+  const facts = analyzeMove(stones, solution_col, solution_row, to_play, board_size);
+  const explanation = facts.captured.length
+    ? `Playing at ${solutionNote} captures ${facts.captured[0].count} ${opponentWord} stone${facts.captured[0].count > 1 ? 's' : ''}.`
+    : facts.atari.length
+    ? `Playing at ${solutionNote} puts ${facts.atari[0].count} ${opponentWord} stone${facts.atari[0].count > 1 ? 's' : ''} in atari.`
+    : `Playing at ${solutionNote} is the key forcing move.`;
+  return {
+    description: `${toPlayWord} to play — find the key move.`,
+    hint:        'Look for the vital point of the position.',
+    explanation,
+  };
+}
+
 async function enrichWithText(problem, rank) {
   const { board_size, to_play, stones, solution_col, solution_row, category } = problem;
 
@@ -161,11 +248,10 @@ async function enrichWithText(problem, rank) {
     ? `PROBLEM TYPE: TESUJI — The description and hint should name the tesuji technique if it is identifiable from the facts.`
     : `PROBLEM TYPE: ${problemCategory.toUpperCase()}`;
 
-  try {
-    const text = await callClaude({
-      model: CLAUDE_MODEL,
-      maxTokens: 250,
-      system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond with a single valid JSON object and nothing else. Do not use markdown code fences. Use this exact shape:
+  const text = await callClaude({
+    model: CLAUDE_MODEL,
+    maxTokens: 250,
+    system: `You are a Go tutor. Write short teaching text for a tsumego problem. Respond with a single valid JSON object and nothing else. Do not use markdown code fences. Use this exact shape:
 {"description":"one sentence describing the task for ${toPlayWord} to play","hint":"Socratic hint pointing to the key tactical idea without revealing the answer coordinate","explanation":"one or two sentences explaining why ${solutionNote} is correct — use ONLY the verified board facts provided, do not add or invent anything"}
 
 ACCURACY CONTRACT:
@@ -176,27 +262,18 @@ Verified board facts are computed by a deterministic rules engine. They are grou
 - Board region ("upper-right", "lower edge", etc.) is pre-computed by the server and provided in the user message — use it verbatim. Do NOT re-derive spatial location from the coordinate notation.
 
 ${categoryInstruction}`,
-      messages: [{
-        role: 'user',
-        content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
-      }],
-    });
+    messages: [{
+      role: 'user',
+      content: `${toPlayWord} to play on a ${board_size}x${board_size} board. Correct move is ${solutionNote} (${region}). Student rank: ${rank}.${roleLabel ? `\n\n${roleLabel}` : ''}${premoveContext ? `\n\n${premoveContext}` : ''}\n\n${factsStr}`,
+    }],
+  });
 
-    const raw = text.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
-    return JSON.parse(raw);
-  } catch (e) {
-    // Safe fallback: use the raw facts directly, no LLM required
-    const fallbackExplanation = facts.captured.length
-      ? `Playing at ${solutionNote} captures ${facts.captured[0].count} ${opponentWord} stone${facts.captured[0].count > 1 ? 's' : ''}.`
-      : facts.atari.length
-      ? `Playing at ${solutionNote} puts ${facts.atari[0].count} ${opponentWord} stone${facts.atari[0].count > 1 ? 's' : ''} in atari.`
-      : `Playing at ${solutionNote} is the key forcing move.`;
-    return {
-      description: `${toPlayWord} to play — find the key move.`,
-      hint:        'Look for the vital point of the position.',
-      explanation: fallbackExplanation,
-    };
+  const raw = text.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
+  const parsed = JSON.parse(raw);
+  if (!parsed?.description || !parsed?.hint || !parsed?.explanation) {
+    throw new Error('Enrichment JSON missing required fields');
   }
+  return parsed; // throws propagate to the handler, which falls back and does not cache
 }
 
 exports.handler = async (event) => {
@@ -211,8 +288,19 @@ exports.handler = async (event) => {
     const { rank, category, userId } = JSON.parse(event.body);
     const difficulty = rankToDifficulty(rank);
 
-    const row  = await fetchProblemFromDB(difficulty, category || null, userId || null, authHeader);
-    const text = await enrichWithText(row, rank || '20 kyu');
+    const row = await fetchProblemFromDB(difficulty, category || null, userId || null, authHeader);
+
+    // Serve cached teaching text when available; generate + cache on miss.
+    let text = await fetchCachedEnrichment(row.id, difficulty);
+    if (!text) {
+      try {
+        text = await enrichWithText(row, bandRankLabel(difficulty));
+        await storeEnrichment(row.id, difficulty, text);
+      } catch (e) {
+        console.error('Enrichment generation failed:', e.message);
+        text = fallbackEnrichment(row); // deterministic, never cached
+      }
+    }
 
     const problem = {
       id:          `db_${row.id}`,
