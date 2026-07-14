@@ -10,6 +10,8 @@
 //     subsequent     → round(prev_interval * ease_factor)
 //   on failure: reset interval to 1, keep ease_factor adjustment
 
+const { corsHeaders, requireUser } = require('./_auth');
+
 const SUPABASE_URL     = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
@@ -107,12 +109,11 @@ async function upsertSchedule(userId, problemId, state, authHeader) {
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin':  '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type':                 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const authHeader = event.headers['authorization'] || event.headers['Authorization'] || '';

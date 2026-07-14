@@ -1,14 +1,14 @@
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
 const { callClaude } = require('./_claude');
+const { corsHeaders, requireUser } = require('./_auth');
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { messages, userContext } = JSON.parse(event.body);

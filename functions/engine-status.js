@@ -2,15 +2,13 @@
 // Returns { ok, ready, humanSL } so the frontend can adapt behaviour
 // (e.g. skip handicap stones when the human SL model is loaded).
 
+const { corsHeaders } = require('./_auth');
+
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
 
   if (!KATAGO_SERVICE_URL) {

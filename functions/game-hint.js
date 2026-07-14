@@ -1,6 +1,7 @@
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
 const { callClaude } = require('./_claude');
+const { corsHeaders, requireUser } = require('./_auth');
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
@@ -45,12 +46,11 @@ async function katagoEval(sgf, playerColor, boardSize, rank) {
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { sgf, boardSize, rank, playerColor, currentStones, moveNumber, gameMode, captureTarget } = JSON.parse(event.body);

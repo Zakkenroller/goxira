@@ -16,6 +16,7 @@
 const CLAUDE_MODEL       = 'claude-haiku-4-5-20251001';
 
 const { callClaude } = require('./_claude');
+const { corsHeaders, requireUser } = require('./_auth');
 
 const KATAGO_SERVICE_URL = process.env.KATAGO_SERVICE_URL;
 const KATAGO_TOKEN       = process.env.KATAGO_TOKEN;
@@ -71,12 +72,11 @@ function formatTopMoves(topMoves, nextColor) {
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin':  '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type':                 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { moveSequence, deviationMove, boardSize = 19, rank = '20 kyu' } = JSON.parse(event.body || '{}');

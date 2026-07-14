@@ -28,14 +28,14 @@ const MIN_GAMES     = 5;
 
 const { visibleCategories, categoryMeta } = require('./_errorCategories');
 const { callClaude } = require('./_claude');
+const { corsHeaders, requireUser } = require('./_auth');
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { games, rank, rankScore } = JSON.parse(event.body);

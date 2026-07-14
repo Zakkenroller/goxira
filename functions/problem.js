@@ -5,6 +5,7 @@ const {
   computePremoveContext, inferProblemRole,
 } = require('./_go-rules');
 const { callClaude } = require('./_claude');
+const { corsHeaders, requireUser } = require('./_auth');
 
 function rankToDifficulty(rank) {
   if (!rank) return 1;
@@ -199,12 +200,11 @@ ${categoryInstruction}`,
 }
 
 exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type': 'application/json',
-  };
+  const headers = corsHeaders();
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const authHeader = event.headers['authorization'] || event.headers['Authorization'] || '';

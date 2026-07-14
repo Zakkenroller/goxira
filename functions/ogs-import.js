@@ -2,16 +2,17 @@
 // Proxied server-side to avoid CORS issues and keep the OGS base URL out of
 // client bundles.
 
+const { corsHeaders, requireUser } = require('./_auth');
+
 const OGS = 'https://online-go.com/api/v1';
 
-const headers = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Content-Type': 'application/json',
-};
+const headers = corsHeaders();
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { action, username, gameId } = JSON.parse(event.body || '{}');

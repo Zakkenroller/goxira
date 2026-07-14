@@ -1,5 +1,7 @@
 'use strict';
 
+const { corsHeaders, requireUser } = require('./_auth');
+
 // Dedicated Atari Go (capture Go) minimax engine.
 // KataGo is trained for standard Go and has no concept of Atari Go's win
 // condition (first to N captures). This engine solves the right problem:
@@ -9,11 +11,7 @@
 // Depth by difficulty: easier=3, auto/match=5, harder=7.
 // Runs entirely serverless — no VPS needed.
 
-const HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Content-Type': 'application/json',
-};
+const HEADERS = corsHeaders();
 
 const DEPTH_BY_DIFFICULTY = { easier: 3, auto: 5, match: 5, harder: 7 };
 const WIN  =  1_000_000;
@@ -260,6 +258,9 @@ function findBestMove(stones, caps, engineColor, playerColor, size, target, maxD
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: HEADERS };
+
+  const auth = await requireUser(event);
+  if (auth.errorResponse) return auth.errorResponse;
 
   try {
     const { currentStones, engineColor, boardSize, atariTarget, difficulty, captures } =
